@@ -32,6 +32,17 @@ struct ChatResponse {
     choices: Vec<ChatChoice>,
 }
 
+/// Reusable HTTP client for translation requests (connection pooling + keep-alive)
+static HTTP_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
+    reqwest::Client::builder()
+        .pool_max_idle_per_host(4)
+        .tcp_keepalive(Some(std::time::Duration::from_secs(30)))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .expect("Failed to create HTTP client")
+});
+
 pub async fn translate(config: &TranslationConfig, text: &str) -> Result<String, String> {
     if !config.enabled {
         return Err("Translation is disabled".to_string());
@@ -64,11 +75,10 @@ pub async fn translate(config: &TranslationConfig, text: &str) -> Result<String,
             },
         ],
         temperature: 0.3,
-        max_tokens: 1000,
+        max_tokens: 256,
     };
 
-    let client = reqwest::Client::new();
-    let response = client
+    let response = HTTP_CLIENT
         .post(&url)
         .header("Authorization", format!("Bearer {}", config.api_key))
         .header("Content-Type", "application/json")

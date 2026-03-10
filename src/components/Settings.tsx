@@ -7,6 +7,7 @@ interface AsrConfig {
   api_key: string;
   model: string;
   sample_rate: number;
+  language: string;
 }
 
 interface TranslationConfig {
@@ -36,10 +37,11 @@ interface SettingsProps {
 export default function Settings({ onBack }: SettingsProps) {
   const [config, setConfig] = useState<AppConfig>({
     asr: {
-      base_url: "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+      base_url: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
       api_key: "",
-      model: "paraformer-realtime-v2",
+      model: "qwen3-asr-flash-realtime",
       sample_rate: 16000,
+      language: "zh",
     },
     translation: {
       enabled: false,
@@ -183,10 +185,10 @@ export default function Settings({ onBack }: SettingsProps) {
                     className="input-field"
                     value={config.asr.base_url}
                     onChange={(e) => updateAsr("base_url", e.target.value)}
-                    placeholder="wss://dashscope.aliyuncs.com/api-ws/v1/inference"
+                    placeholder="wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
                   />
                   <span className="form-hint">
-                    阿里云百炼 DashScope 实时语音识别 WebSocket 地址
+                    阿里云百炼 Realtime API 地址（不含 model 参数，系统自动拼接）
                   </span>
                 </div>
                 <div className="form-field">
@@ -217,11 +219,10 @@ export default function Settings({ onBack }: SettingsProps) {
                     className="input-field"
                     value={config.asr.model}
                     onChange={(e) => updateAsr("model", e.target.value)}
-                    placeholder="paraformer-realtime-v2"
+                    placeholder="qwen3-asr-flash-realtime"
                   />
                   <span className="form-hint">
-                    可选：paraformer-realtime-v2、fun-asr-realtime、gummy-realtime-v1
-                    等
+                    推荐：qwen3-asr-flash-realtime（稳定版）、qwen3-asr-flash-realtime-2026-02-10（最新快照版）
                   </span>
                 </div>
               </div>
@@ -286,17 +287,6 @@ export default function Settings({ onBack }: SettingsProps) {
                         updateTranslation("model", e.target.value)
                       }
                       placeholder="gpt-4o-mini"
-                    />
-                  </div>
-                  <div className="form-field">
-                    <label className="form-label">目标语言</label>
-                    <input
-                      className="input-field"
-                      value={config.translation.target_language}
-                      onChange={(e) =>
-                        updateTranslation("target_language", e.target.value)
-                      }
-                      placeholder="中文"
                     />
                   </div>
                   <div className="form-field">

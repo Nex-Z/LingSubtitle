@@ -10,6 +10,7 @@ pub struct AsrConfig {
     pub api_key: String,
     pub model: String,
     pub sample_rate: u32,
+    pub language: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,10 +39,11 @@ pub struct AppConfig {
 impl Default for AsrConfig {
     fn default() -> Self {
         Self {
-            base_url: "wss://dashscope.aliyuncs.com/api-ws/v1/inference".to_string(),
+            base_url: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime".to_string(),
             api_key: String::new(),
-            model: "paraformer-realtime-v2".to_string(),
+            model: "qwen3-asr-flash-realtime".to_string(),
             sample_rate: 16000,
+            language: "auto".to_string(),
         }
     }
 }

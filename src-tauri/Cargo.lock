@@ -2120,6 +2120,7 @@ dependencies = [
 name = "lingsubtitle"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "cpal",
  "dirs",

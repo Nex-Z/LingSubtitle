@@ -45,7 +45,6 @@ async fn start_capture(
     let mut asr_config = config.asr.clone();
     asr_config.sample_rate = sample_rate;
 
-    let translation_config = config.translation.clone();
     let save_config = config.save.clone();
 
     // Get initial translation_enabled state from config
@@ -54,7 +53,7 @@ async fn start_capture(
             .translation_enabled
             .lock()
             .map_err(|e| e.to_string())?;
-        *te = translation_config.enabled;
+        *te = config.translation.enabled;
     }
 
     // Create ASR result channel
@@ -76,46 +75,138 @@ async fn start_capture(
         let mut subtitle_mgr = subtitle::SubtitleManager::new(&save_config.save_path);
         subtitle_mgr.start_new_session();
 
-        while let Some(asr_result) = result_rx.recv().await {
-            // Emit original text (intermediate or final)
-            let _ = app_result.emit("subtitle-original", &asr_result.text);
+        // Fallback translation state
+        let mut pending_intermediate: Option<String> = None;
+        let mut intermediate_start: Option<tokio::time::Instant> = None;
+        let mut last_translated_text: String = String::new();
 
-            // Only translate and save on final sentences
-            if asr_result.is_final {
-                // Check runtime translation_enabled flag
-                let do_translate = app_result
-                    .state::<AppState>()
-                    .translation_enabled
-                    .lock()
-                    .map(|v| *v)
-                    .unwrap_or(false);
+        const FALLBACK_CHAR_THRESHOLD: usize = 30;
+        const FALLBACK_TIME_SECS: u64 = 5;
 
-                let translated = if do_translate {
-                    match translation::translate(&translation_config, &asr_result.text).await {
-                        Ok(t) => {
-                            let _ = app_result.emit("subtitle-translated", &t);
-                            Some(t)
+        // Helper closure-like: check if fallback translation should fire
+        fn should_fallback_translate(
+            text: &Option<String>,
+            start: &Option<tokio::time::Instant>,
+            last_translated: &str,
+        ) -> bool {
+            if let (Some(t), Some(s)) = (text, start) {
+                if t == last_translated {
+                    return false; // Already translated this exact text
+                }
+                t.chars().count() >= FALLBACK_CHAR_THRESHOLD
+                    || s.elapsed() >= std::time::Duration::from_secs(FALLBACK_TIME_SECS)
+            } else {
+                false
+            }
+        }
+
+        loop {
+            // Use a short tick interval to check fallback conditions
+            let fallback_check = tokio::time::sleep(tokio::time::Duration::from_millis(500));
+
+            tokio::select! {
+                result = result_rx.recv() => {
+                    match result {
+                        Some(asr_result) => {
+                            // Emit original text (intermediate or final)
+                            let _ = app_result.emit("subtitle-original", &asr_result.text);
+
+                            if asr_result.is_final {
+                                // Clear fallback state
+                                pending_intermediate = None;
+                                intermediate_start = None;
+
+                                // Check runtime translation_enabled flag
+                                let do_translate = app_result
+                                    .state::<AppState>()
+                                    .translation_enabled
+                                    .lock()
+                                    .map(|v| *v)
+                                    .unwrap_or(false);
+
+                                if do_translate && asr_result.text != last_translated_text {
+                                    last_translated_text = asr_result.text.clone();
+                                    let app_for_translate = app_result.clone();
+                                    let text = asr_result.text.clone();
+                                    // Read live config for each translation
+                                    let translate_config = app_for_translate
+                                        .state::<Mutex<AppConfig>>()
+                                        .lock()
+                                        .map(|c| c.translation.clone())
+                                        .unwrap_or_else(|_| config::TranslationConfig::default());
+                                    tauri::async_runtime::spawn(async move {
+                                        match translation::translate(&translate_config, &text).await {
+                                            Ok(t) => {
+                                                let _ = app_for_translate.emit("subtitle-translated", &t);
+                                            }
+                                            Err(e) => {
+                                                let _ = app_for_translate.emit(
+                                                    "subtitle-error",
+                                                    format!("翻译错误: {}", e),
+                                                );
+                                            }
+                                        }
+                                    });
+                                }
+
+                                // Auto-save
+                                let entry = subtitle::SubtitleEntry {
+                                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                                    original: asr_result.text.clone(),
+                                    translated: None,
+                                };
+                                if save_config.auto_save {
+                                    subtitle_mgr.save_entry(&entry).ok();
+                                }
+                            } else {
+                                // Intermediate result: track for fallback
+                                if pending_intermediate.is_none() {
+                                    intermediate_start = Some(tokio::time::Instant::now());
+                                }
+                                pending_intermediate = Some(asr_result.text.clone());
+                            }
                         }
-                        Err(e) => {
-                            let _ = app_result.emit(
-                                "subtitle-error",
-                                format!("翻译错误: {}", e),
-                            );
-                            None
+                        None => break, // Channel closed
+                    }
+                }
+                _ = fallback_check => {
+                    // Check if we should trigger fallback translation
+                    if should_fallback_translate(&pending_intermediate, &intermediate_start, &last_translated_text) {
+                        let do_translate = app_result
+                            .state::<AppState>()
+                            .translation_enabled
+                            .lock()
+                            .map(|v| *v)
+                            .unwrap_or(false);
+
+                        if do_translate {
+                            let text = pending_intermediate.clone().unwrap();
+                            last_translated_text = text.clone();
+                            // Reset timer so next fallback waits again
+                            intermediate_start = Some(tokio::time::Instant::now());
+
+                            let app_for_translate = app_result.clone();
+                            // Read live config for each translation
+                            let translate_config = app_for_translate
+                                .state::<Mutex<AppConfig>>()
+                                .lock()
+                                .map(|c| c.translation.clone())
+                                .unwrap_or_else(|_| config::TranslationConfig::default());
+                            tauri::async_runtime::spawn(async move {
+                                match translation::translate(&translate_config, &text).await {
+                                    Ok(t) => {
+                                        let _ = app_for_translate.emit("subtitle-translated", &t);
+                                    }
+                                    Err(e) => {
+                                        let _ = app_for_translate.emit(
+                                            "subtitle-error",
+                                            format!("翻译错误: {}", e),
+                                        );
+                                    }
+                                }
+                            });
                         }
                     }
-                } else {
-                    None
-                };
-
-                // Auto-save
-                let entry = subtitle::SubtitleEntry {
-                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-                    original: asr_result.text.clone(),
-                    translated,
-                };
-                if save_config.auto_save {
-                    subtitle_mgr.save_entry(&entry).ok();
                 }
             }
         }

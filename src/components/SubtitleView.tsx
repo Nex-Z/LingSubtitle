@@ -3,6 +3,67 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./SubtitleView.css";
 
+// Custom Dropdown Component for the dock
+function DockDropdown({
+  label,
+  options,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  options: { value: string; short: string; full: string }[];
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    if (open) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  const selected = options.find((o) => o.value === value);
+
+  return (
+    <div className={`dock-dropdown ${disabled ? "disabled" : ""}`} ref={ref}>
+      <button
+        className="dock-dropdown-trigger"
+        onClick={() => !disabled && setOpen(!open)}
+        disabled={disabled}
+      >
+        <span className="dock-dropdown-label">{label}</span>
+        <span className="dock-dropdown-value">{selected?.short || value}</span>
+        <span className="dock-dropdown-arrow">{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <div className="dock-dropdown-menu">
+          {options.map((opt) => (
+            <div
+              key={opt.value}
+              className={`dock-dropdown-option ${opt.value === value ? "active" : ""}`}
+              onClick={() => {
+                onChange(opt.value);
+                setOpen(false);
+              }}
+            >
+              <span className="option-label">{opt.full}</span>
+              {opt.value === value && <span className="option-check">✓</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface SubtitleItem {
   id: number;
   timestamp: string;
@@ -27,8 +88,45 @@ export default function SubtitleView({
   const [error, setError] = useState<string | null>(null);
   const [translationEnabled, setTranslationEnabled] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [asrLanguage, setAsrLanguage] = useState("auto");
+  const [targetLanguage, setTargetLanguage] = useState("中文");
   const listRef = useRef<HTMLDivElement>(null);
   const idCounter = useRef(0);
+
+  // Supported ASR languages
+  const asrLanguages = [
+    { value: "auto", short: "自动", full: "自动识别" },
+    { value: "zh", short: "中文", full: "中文" },
+    { value: "en", short: "英语", full: "英语 (English)" },
+    { value: "ja", short: "日语", full: "日语 (日本語)" },
+    { value: "ko", short: "韩语", full: "韩语 (한국어)" },
+    { value: "de", short: "德语", full: "德语 (Deutsch)" },
+    { value: "fr", short: "法语", full: "法语 (Français)" },
+    { value: "es", short: "西班牙语", full: "西班牙语 (Español)" },
+    { value: "ru", short: "俄语", full: "俄语 (Русский)" },
+    { value: "pt", short: "葡萄牙语", full: "葡萄牙语 (Português)" },
+    { value: "ar", short: "阿拉伯语", full: "阿拉伯语 (العربية)" },
+    { value: "it", short: "意大利语", full: "意大利语 (Italiano)" },
+    { value: "hi", short: "印地语", full: "印地语 (हिन्दी)" },
+    { value: "th", short: "泰语", full: "泰语 (ไทย)" },
+    { value: "vi", short: "越南语", full: "越南语 (Tiếng Việt)" },
+    { value: "id", short: "印尼语", full: "印尼语 (Indonesia)" },
+  ];
+
+  // Translation target languages
+  const translationLanguages = [
+    { value: "中文", short: "中文", full: "中文" },
+    { value: "English", short: "英语", full: "英语 (English)" },
+    { value: "日本語", short: "日语", full: "日语 (日本語)" },
+    { value: "한국어", short: "韩语", full: "韩语 (한국어)" },
+    { value: "Deutsch", short: "德语", full: "德语 (Deutsch)" },
+    { value: "Français", short: "法语", full: "法语 (Français)" },
+    { value: "Español", short: "西班牙语", full: "西班牙语 (Español)" },
+    { value: "Русский", short: "俄语", full: "俄语 (Русский)" },
+    { value: "Português", short: "葡萄牙语", full: "葡萄牙语 (Português)" },
+    { value: "Italiano", short: "意大利语", full: "意大利语 (Italiano)" },
+    { value: "العربية", short: "阿拉伯语", full: "阿拉伯语 (العربية)" },
+  ];
 
   // Timer logic
   useEffect(() => {
@@ -57,12 +155,51 @@ export default function SubtitleView({
       .join(":");
   };
 
-  // Load initial translation state from config
+  // Load initial state from config
   useEffect(() => {
-    invoke<{ translation: { enabled: boolean } }>("get_config")
-      .then((cfg) => setTranslationEnabled(cfg.translation.enabled))
+    invoke<{
+      asr: { language: string };
+      translation: { enabled: boolean; target_language: string };
+    }>("get_config")
+      .then((cfg) => {
+        setTranslationEnabled(cfg.translation.enabled);
+        setAsrLanguage(cfg.asr.language || "zh");
+        setTargetLanguage(cfg.translation.target_language || "中文");
+      })
       .catch(() => {});
   }, []);
+
+  // Save language changes back to config
+  const handleAsrLanguageChange = async (lang: string) => {
+    setAsrLanguage(lang);
+    try {
+      const cfg = await invoke<Record<string, unknown>>("get_config");
+      const updatedCfg = {
+        ...cfg,
+        asr: { ...(cfg.asr as Record<string, unknown>), language: lang },
+      };
+      await invoke("save_config", { config: updatedCfg });
+    } catch (err) {
+      console.error("Failed to save ASR language:", err);
+    }
+  };
+
+  const handleTargetLanguageChange = async (lang: string) => {
+    setTargetLanguage(lang);
+    try {
+      const cfg = await invoke<Record<string, unknown>>("get_config");
+      const updatedCfg = {
+        ...cfg,
+        translation: {
+          ...(cfg.translation as Record<string, unknown>),
+          target_language: lang,
+        },
+      };
+      await invoke("save_config", { config: updatedCfg });
+    } catch (err) {
+      console.error("Failed to save target language:", err);
+    }
+  };
 
   useEffect(() => {
     // Check initial capture status
@@ -324,21 +461,34 @@ export default function SubtitleView({
                     <span className="subtitle-time">{item.timestamp}</span>
                     {!item.isFinal && <span className="streaming-indicator">进行中</span>}
                   </div>
-                  <div className="subtitle-split-content">
-                    <div className="subtitle-col original">
-                      <div className="subtitle-label">原文</div>
-                      <div className="subtitle-text">{item.original}</div>
-                    </div>
-                    {item.translated && (
-                      <>
-                        <div className="subtitle-col-divider" />
-                        <div className="subtitle-col translated">
-                          <div className="subtitle-label">译文</div>
-                          <div className="subtitle-text">{item.translated}</div>
+                  {translationEnabled ? (
+                    /* Translation ON: translated text is primary */
+                    <div className="subtitle-split-content">
+                      <div className="subtitle-col translated">
+                        <div className="subtitle-label">译文</div>
+                        <div className="subtitle-text">
+                          {item.translated || (item.isFinal ? "翻译中..." : item.original)}
                         </div>
-                      </>
-                    )}
-                  </div>
+                      </div>
+                      {item.original && (
+                        <>
+                          <div className="subtitle-col-divider" />
+                          <div className="subtitle-col original ref-text">
+                            <div className="subtitle-label">原文</div>
+                            <div className="subtitle-text">{item.original}</div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    /* Translation OFF: original only */
+                    <div className="subtitle-split-content">
+                      <div className="subtitle-col original">
+                        <div className="subtitle-label">原文</div>
+                        <div className="subtitle-text">{item.original}</div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
               <div className="list-padding-bottom" />
@@ -362,6 +512,19 @@ export default function SubtitleView({
 
             <div className="dock-divider" />
 
+            {/* ASR Language Selector */}
+            <div className="dock-group">
+              <DockDropdown
+                label="🎤 识别"
+                options={asrLanguages}
+                value={asrLanguage}
+                onChange={handleAsrLanguageChange}
+                disabled={isRecording}
+              />
+            </div>
+
+            <div className="dock-divider" />
+
             <button
               className={`btn-record-main ${isRecording ? "recording" : "idle"}`}
               onClick={handleToggleRecord}
@@ -373,10 +536,22 @@ export default function SubtitleView({
 
             <div className="dock-divider" />
 
+            {/* Translation Target Language Selector */}
+            <div className="dock-group">
+              <DockDropdown
+                label="🌐 译为"
+                options={translationLanguages}
+                value={targetLanguage}
+                onChange={handleTargetLanguageChange}
+                disabled={!translationEnabled}
+              />
+            </div>
+
+            <div className="dock-divider" />
+
             <div className="dock-group">
               <div className="dock-toggle-item">
-                <span className="dock-icon">🌐</span>
-                <span className="dock-label">中英翻译</span>
+                <span className="dock-label">翻译</span>
                 <label className="toggle-switch-mini">
                   <input
                     type="checkbox"
