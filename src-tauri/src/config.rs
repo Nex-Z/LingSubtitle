@@ -39,6 +39,7 @@ pub struct AppConfig {
     pub asr: AsrConfig,
     pub translation: TranslationConfig,
     pub save: SaveConfig,
+    pub filter_fillers: bool,
 }
 
 impl Default for AsrConfig {
@@ -85,6 +86,7 @@ impl Default for AppConfig {
             asr: AsrConfig::default(),
             translation: TranslationConfig::default(),
             save: SaveConfig::default(),
+            filter_fillers: false,
         }
     }
 }

@@ -74,8 +74,8 @@ pub async fn translate(config: &TranslationConfig, text: &str) -> Result<String,
                 content: text.to_string(),
             },
         ],
-        temperature: 0.3,
-        max_tokens: 256,
+        temperature: 0.1,
+        max_tokens: 128,
     };
 
     let response = HTTP_CLIENT

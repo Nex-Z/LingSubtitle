@@ -29,6 +29,7 @@ interface AppConfig {
   asr: AsrConfig;
   translation: TranslationConfig;
   save: SaveConfig;
+  filter_fillers: boolean;
 }
 
 interface SettingsProps {
@@ -58,6 +59,7 @@ export default function Settings({ onBack }: SettingsProps) {
       auto_save: true,
       save_path: "",
     },
+    filter_fillers: false,
   });
   const [showSuccess, setShowSuccess] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -194,6 +196,25 @@ export default function Settings({ onBack }: SettingsProps) {
                 </span>
               </div>
               <div className="settings-section-body">
+                <div className="form-field">
+                  <label className="form-label">过滤单独语气词</label>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={config.filter_fillers}
+                      onChange={(e) =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          filter_fillers: e.target.checked,
+                        }))
+                      }
+                    />
+                    <span className="toggle-slider" />
+                  </label>
+                  <span className="form-hint">
+                    仅过滤单独出现的语气词（如“嗯”“啊”“呃”），不会影响正常句子。
+                  </span>
+                </div>
                 <div className="form-field">
                   <label className="form-label">WebSocket 地址</label>
                   <input

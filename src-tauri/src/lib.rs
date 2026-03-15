@@ -79,9 +79,56 @@ async fn start_capture(
         let mut pending_intermediate: Option<String> = None;
         let mut intermediate_start: Option<tokio::time::Instant> = None;
         let mut last_translated_text: String = String::new();
+        let mut last_intermediate_text: String = String::new();
+        let mut stable_suffix_count: u32 = 0;
+        let mut last_change_at: Option<tokio::time::Instant> = None;
+        let mut last_translate_request_at: Option<tokio::time::Instant> = None;
+        let mut last_final_at: Option<tokio::time::Instant> = None;
+        let mut last_intermediate_sent_at: Option<tokio::time::Instant> = None;
 
-        const FALLBACK_CHAR_THRESHOLD: usize = 30;
-        const FALLBACK_TIME_SECS: u64 = 5;
+        const FALLBACK_CHAR_THRESHOLD: usize = 15;
+        const FALLBACK_TIME_SECS: u64 = 2;
+        const STABLE_SUFFIX_MIN: usize = 8;
+        const STABLE_COUNT_MIN: u32 = 3;
+        const STABLE_WAIT_MILLIS: u64 = 800;
+        const TRANSLATE_MIN_INTERVAL_MILLIS: u64 = 700;
+
+        let latest_req_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let (translate_tx, mut translate_rx) = watch::channel::<Option<(u64, String)>>(None);
+
+        let app_translate_worker = app_result.clone();
+        let latest_req_id_worker = latest_req_id.clone();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                if translate_rx.changed().await.is_err() {
+                    break;
+                }
+                let payload = translate_rx.borrow().clone();
+                let Some((req_id, text)) = payload else { continue; };
+
+                let translate_config = app_translate_worker
+                    .state::<Mutex<AppConfig>>()
+                    .lock()
+                    .map(|c| c.translation.clone())
+                    .unwrap_or_else(|_| config::TranslationConfig::default());
+
+                match translation::translate(&translate_config, &text).await {
+                    Ok(t) => {
+                        if req_id
+                            == latest_req_id_worker.load(std::sync::atomic::Ordering::Relaxed)
+                        {
+                            let _ = app_translate_worker.emit("subtitle-translated", &t);
+                        }
+                    }
+                    Err(e) => {
+                        let _ = app_translate_worker.emit(
+                            "subtitle-error",
+                            format!("翻译错误: {}", e),
+                        );
+                    }
+                }
+            }
+        });
 
         // Helper closure-like: check if fallback translation should fire
         fn should_fallback_translate(
@@ -100,6 +147,74 @@ async fn start_capture(
             }
         }
 
+        fn common_suffix_len(a: &str, b: &str) -> usize {
+            let mut count = 0usize;
+            let mut a_iter = a.chars().rev();
+            let mut b_iter = b.chars().rev();
+            loop {
+                match (a_iter.next(), b_iter.next()) {
+                    (Some(x), Some(y)) if x == y => count += 1,
+                    _ => break,
+                }
+            }
+            count
+        }
+
+        fn can_trigger(
+            now: tokio::time::Instant,
+            last: &Option<tokio::time::Instant>,
+        ) -> bool {
+            match last {
+                Some(t) => {
+                    now.duration_since(*t)
+                        >= std::time::Duration::from_millis(TRANSLATE_MIN_INTERVAL_MILLIS)
+                }
+                None => true,
+            }
+        }
+
+        fn is_filler_only(text: &str) -> bool {
+            fn is_punct_or_space(c: char) -> bool {
+                matches!(
+                    c,
+                    ' ' | '\t' | '\n' | '\r'
+                        | '.' | ',' | '!' | '?' | ':' | ';'
+                        | '。' | '，' | '！' | '？' | '：' | '；'
+                        | '…' | '—' | '-' | '–' | '·' | '、' | '_' | '～'
+                )
+            }
+
+            let normalized: String = text.chars().filter(|c| !is_punct_or_space(*c)).collect();
+            if normalized.is_empty() {
+                return false;
+            }
+
+            let lower = normalized.to_lowercase();
+            let en_fillers = ["um", "uh", "er", "ah", "oh", "hmm", "hm"];
+            if en_fillers.iter().any(|f| f == &lower) {
+                return true;
+            }
+
+            let zh_fillers = [
+                "嗯", "啊", "呃", "哦", "噢", "唔", "额", "诶", "欸", "哎", "呀", "嘛", "呗",
+                "嘿", "哈", "嗯哼",
+            ];
+            if zh_fillers.iter().any(|f| f == &normalized) {
+                return true;
+            }
+
+            if normalized.chars().count() <= 3 {
+                let mut chars = normalized.chars();
+                if let Some(first) = chars.next() {
+                    if chars.all(|c| c == first) {
+                        return zh_fillers.iter().any(|f| f.chars().next() == Some(first));
+                    }
+                }
+            }
+
+            false
+        }
+
         loop {
             // Use a short tick interval to check fallback conditions
             let fallback_check = tokio::time::sleep(tokio::time::Duration::from_millis(500));
@@ -108,6 +223,14 @@ async fn start_capture(
                 result = result_rx.recv() => {
                     match result {
                         Some(asr_result) => {
+                            let filter_fillers = app_result
+                                .state::<Mutex<AppConfig>>()
+                                .lock()
+                                .map(|c| c.filter_fillers)
+                                .unwrap_or(false);
+                            if filter_fillers && is_filler_only(&asr_result.text) {
+                                continue;
+                            }
                             // Emit original text (intermediate or final)
                             let _ = app_result.emit("subtitle-original", &asr_result.text);
 
@@ -115,6 +238,10 @@ async fn start_capture(
                                 // Clear fallback state
                                 pending_intermediate = None;
                                 intermediate_start = None;
+                                last_intermediate_text.clear();
+                                stable_suffix_count = 0;
+                                last_change_at = None;
+                                last_final_at = Some(tokio::time::Instant::now());
 
                                 // Check runtime translation_enabled flag
                                 let do_translate = app_result
@@ -126,27 +253,12 @@ async fn start_capture(
 
                                 if do_translate && asr_result.text != last_translated_text {
                                     last_translated_text = asr_result.text.clone();
-                                    let app_for_translate = app_result.clone();
                                     let text = asr_result.text.clone();
-                                    // Read live config for each translation
-                                    let translate_config = app_for_translate
-                                        .state::<Mutex<AppConfig>>()
-                                        .lock()
-                                        .map(|c| c.translation.clone())
-                                        .unwrap_or_else(|_| config::TranslationConfig::default());
-                                    tauri::async_runtime::spawn(async move {
-                                        match translation::translate(&translate_config, &text).await {
-                                            Ok(t) => {
-                                                let _ = app_for_translate.emit("subtitle-translated", &t);
-                                            }
-                                            Err(e) => {
-                                                let _ = app_for_translate.emit(
-                                                    "subtitle-error",
-                                                    format!("翻译错误: {}", e),
-                                                );
-                                            }
-                                        }
-                                    });
+                                    let req_id = latest_req_id
+                                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                                        + 1;
+                                    let _ = translate_tx.send(Some((req_id, text)));
+                                    last_translate_request_at = Some(tokio::time::Instant::now());
                                 }
 
                                 // Auto-save
@@ -160,10 +272,71 @@ async fn start_capture(
                                 }
                             } else {
                                 // Intermediate result: track for fallback
+                                let now = tokio::time::Instant::now();
                                 if pending_intermediate.is_none() {
-                                    intermediate_start = Some(tokio::time::Instant::now());
+                                    intermediate_start = Some(now);
                                 }
                                 pending_intermediate = Some(asr_result.text.clone());
+
+                                // Track stability of suffix to trigger earlier translation
+                                if !last_intermediate_text.is_empty() {
+                                    let suffix_len =
+                                        common_suffix_len(&last_intermediate_text, &asr_result.text);
+                                    if suffix_len >= STABLE_SUFFIX_MIN {
+                                        stable_suffix_count += 1;
+                                    } else {
+                                        stable_suffix_count = 0;
+                                        last_change_at = Some(now);
+                                    }
+                                } else {
+                                    last_change_at = Some(now);
+                                }
+                                last_intermediate_text = asr_result.text.clone();
+
+                                // If stable for a short time, trigger translation early
+                                let do_translate = app_result
+                                    .state::<AppState>()
+                                    .translation_enabled
+                                    .lock()
+                                    .map(|v| *v)
+                                    .unwrap_or(false);
+                                if do_translate
+                                    && stable_suffix_count >= STABLE_COUNT_MIN
+                                    && last_intermediate_text != last_translated_text
+                                {
+                                    let stable_ok = last_change_at
+                                        .map(|t| {
+                                            now.duration_since(t)
+                                                >= std::time::Duration::from_millis(STABLE_WAIT_MILLIS)
+                                        })
+                                        .unwrap_or(false);
+                                    let final_ok = last_final_at
+                                        .map(|t| {
+                                            now.duration_since(t)
+                                                >= std::time::Duration::from_millis(1200)
+                                        })
+                                        .unwrap_or(true);
+                                    let interval_ok = last_intermediate_sent_at
+                                        .map(|t| {
+                                            now.duration_since(t)
+                                                >= std::time::Duration::from_millis(1500)
+                                        })
+                                        .unwrap_or(true);
+                                    if stable_ok
+                                        && final_ok
+                                        && interval_ok
+                                        && can_trigger(now, &last_translate_request_at)
+                                    {
+                                        let text = last_intermediate_text.clone();
+                                        last_translated_text = text.clone();
+                                        let req_id = latest_req_id
+                                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                                            + 1;
+                                        let _ = translate_tx.send(Some((req_id, text)));
+                                        last_intermediate_sent_at = Some(now);
+                                        last_translate_request_at = Some(now);
+                                    }
+                                }
                             }
                         }
                         None => break, // Channel closed
@@ -184,27 +357,11 @@ async fn start_capture(
                             last_translated_text = text.clone();
                             // Reset timer so next fallback waits again
                             intermediate_start = Some(tokio::time::Instant::now());
-
-                            let app_for_translate = app_result.clone();
-                            // Read live config for each translation
-                            let translate_config = app_for_translate
-                                .state::<Mutex<AppConfig>>()
-                                .lock()
-                                .map(|c| c.translation.clone())
-                                .unwrap_or_else(|_| config::TranslationConfig::default());
-                            tauri::async_runtime::spawn(async move {
-                                match translation::translate(&translate_config, &text).await {
-                                    Ok(t) => {
-                                        let _ = app_for_translate.emit("subtitle-translated", &t);
-                                    }
-                                    Err(e) => {
-                                        let _ = app_for_translate.emit(
-                                            "subtitle-error",
-                                            format!("翻译错误: {}", e),
-                                        );
-                                    }
-                                }
-                            });
+                            let req_id = latest_req_id
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                                + 1;
+                            let _ = translate_tx.send(Some((req_id, text)));
+                            last_translate_request_at = Some(tokio::time::Instant::now());
                         }
                     }
                 }
