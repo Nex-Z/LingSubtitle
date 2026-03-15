@@ -25,10 +25,17 @@ interface SaveConfig {
   save_path: string;
 }
 
+interface CaptureConfig {
+  source: string;
+  app_pid?: number | null;
+  app_name?: string;
+}
+
 interface AppConfig {
   asr: AsrConfig;
   translation: TranslationConfig;
   save: SaveConfig;
+  capture: CaptureConfig;
   filter_fillers: boolean;
 }
 
@@ -58,6 +65,11 @@ export default function Settings({ onBack }: SettingsProps) {
     save: {
       auto_save: true,
       save_path: "",
+    },
+    capture: {
+      source: "system",
+      app_pid: null,
+      app_name: "",
     },
     filter_fillers: false,
   });

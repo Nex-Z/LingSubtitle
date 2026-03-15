@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 use tokio::sync::{mpsc, watch};
 
-use audio::AudioCapture;
+use audio::{AudioApp, AudioCapture};
 use config::{AppConfig, load_config};
 
 struct AppState {
@@ -36,9 +36,27 @@ async fn start_capture(
     let (audio_tx, audio_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
     // Start audio capture
+    let capture_pid = if config.capture.source == "app" {
+        config.capture.app_pid
+    } else {
+        None
+    };
+
     let sample_rate = {
         let mut audio_guard = state.audio.lock().map_err(|e| e.to_string())?;
-        audio_guard.start(audio_tx)?
+        match capture_pid {
+            Some(pid) => match audio_guard.start(audio_tx.clone(), Some(pid)) {
+                Ok(rate) => rate,
+                Err(e) => {
+                    let _ = app.emit(
+                        "subtitle-error",
+                        format!("应用录制失败，已回退系统声音: {}", e),
+                    );
+                    audio_guard.start(audio_tx, None)?
+                }
+            },
+            None => audio_guard.start(audio_tx, None)?,
+        }
     };
 
     // Update ASR config with actual sample rate
@@ -401,6 +419,11 @@ fn get_capture_status(state: tauri::State<'_, AppState>) -> bool {
 }
 
 #[tauri::command]
+fn list_audio_apps() -> Result<Vec<AudioApp>, String> {
+    audio::list_audio_apps()
+}
+
+#[tauri::command]
 fn set_translation_enabled(
     state: tauri::State<'_, AppState>,
     enabled: bool,
@@ -512,6 +535,7 @@ pub fn run() {
             start_capture,
             stop_capture,
             get_capture_status,
+            list_audio_apps,
             set_translation_enabled,
             check_translation_config,
             config::get_config,

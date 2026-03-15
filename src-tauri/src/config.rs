@@ -35,10 +35,19 @@ pub struct SaveConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+pub struct CaptureConfig {
+    pub source: String,
+    pub app_pid: Option<u32>,
+    pub app_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     pub asr: AsrConfig,
     pub translation: TranslationConfig,
     pub save: SaveConfig,
+    pub capture: CaptureConfig,
     pub filter_fillers: bool,
 }
 
@@ -80,12 +89,23 @@ impl Default for SaveConfig {
     }
 }
 
+impl Default for CaptureConfig {
+    fn default() -> Self {
+        Self {
+            source: "system".to_string(),
+            app_pid: None,
+            app_name: String::new(),
+        }
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             asr: AsrConfig::default(),
             translation: TranslationConfig::default(),
             save: SaveConfig::default(),
+            capture: CaptureConfig::default(),
             filter_fillers: false,
         }
     }

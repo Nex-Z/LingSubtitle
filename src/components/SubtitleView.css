@@ -324,6 +324,31 @@
   position: relative;
 }
 
+.dock-refresh-btn {
+  border: none;
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-secondary);
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dock-refresh-btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--text-primary);
+}
+
+.dock-refresh-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .dock-dropdown.disabled {
   opacity: 0.4;
   pointer-events: none;
