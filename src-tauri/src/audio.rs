@@ -5,6 +5,9 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 const TARGET_SAMPLE_RATE: u32 = 16000;
+// Simple noise gate to reduce low-level background noise.
+// Tune this if quiet speech gets clipped (lower) or noise leaks (higher).
+const NOISE_GATE_THRESHOLD: f32 = 0.02; // ~ -34 dBFS
 
 pub struct AudioCapture {
     is_running: Arc<AtomicBool>,
@@ -82,8 +85,11 @@ impl AudioCapture {
                 // Step 1: Mix down to mono (average all channels per frame)
                 let mono_samples = mix_to_mono(&raw_samples, channels);
 
+                // Step 1.5: Apply simple noise gate on the mono signal
+                let gated = apply_noise_gate(&mono_samples, NOISE_GATE_THRESHOLD);
+
                 // Step 2: Resample from device rate to 16kHz
-                let resampled = resample(&mono_samples, device_sample_rate, TARGET_SAMPLE_RATE);
+                let resampled = resample(&gated, device_sample_rate, TARGET_SAMPLE_RATE);
 
                 // Step 3: Convert f32 → i16 → little-endian bytes (raw PCM)
                 let pcm_bytes = f32_to_pcm16_bytes(&resampled);
@@ -217,4 +223,30 @@ fn f32_to_pcm16_bytes(samples: &[f32]) -> Vec<u8> {
         bytes.extend_from_slice(&int_sample.to_le_bytes());
     }
     bytes
+}
+
+fn apply_noise_gate(samples: &[f32], threshold: f32) -> Vec<f32> {
+    if samples.is_empty() {
+        return Vec::new();
+    }
+
+    // Compute RMS for the chunk
+    let mut sum_sq = 0.0f32;
+    for &s in samples {
+        sum_sq += s * s;
+    }
+    let rms = (sum_sq / samples.len() as f32).sqrt();
+
+    // Soft gate: attenuate below threshold instead of hard mute
+    let gain = if rms <= 0.0 {
+        0.0
+    } else {
+        (rms / threshold).clamp(0.0, 1.0)
+    };
+
+    if gain >= 1.0 {
+        return samples.to_vec();
+    }
+
+    samples.iter().map(|s| s * gain).collect()
 }

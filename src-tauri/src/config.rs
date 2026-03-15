@@ -5,15 +5,18 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AsrConfig {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
     pub sample_rate: u32,
     pub language: String,
+    pub vad_silence_ms: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TranslationConfig {
     pub enabled: bool,
     pub base_url: String,
@@ -24,12 +27,14 @@ pub struct TranslationConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SaveConfig {
     pub auto_save: bool,
     pub save_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     pub asr: AsrConfig,
     pub translation: TranslationConfig,
@@ -44,6 +49,7 @@ impl Default for AsrConfig {
             model: "qwen3-asr-flash-realtime".to_string(),
             sample_rate: 16000,
             language: "auto".to_string(),
+            vad_silence_ms: 300,
         }
     }
 }

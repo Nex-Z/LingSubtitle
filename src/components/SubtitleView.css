@@ -9,10 +9,13 @@
 /* Sidebar Styling */
 .subtitle-sidebar {
   width: 220px;
+  min-width: 200px;
+  max-width: 260px;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  flex: 0 0 auto;
   flex-shrink: 0;
   z-index: 101;
 }
@@ -42,7 +45,7 @@
   padding: 0 12px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
 }
 
 .nav-group {
@@ -74,6 +77,9 @@
   cursor: pointer;
   transition: all var(--transition-fast);
   text-align: left;
+  width: 100%;
+  justify-content: flex-start;
+  white-space: nowrap;
 }
 
 .nav-item:hover {
@@ -127,7 +133,8 @@
 
 /* Main Area Styling */
 .subtitle-main {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -147,12 +154,19 @@
   border-bottom: 1px solid var(--border);
   z-index: 100;
   flex-shrink: 0;
+  gap: 12px;
 }
 
 .header-drag-area {
   flex: 1;
   height: 100%;
   -webkit-app-region: drag;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
 
 .header-right {
@@ -185,6 +199,7 @@
   flex: 1;
   overflow-y: auto;
   position: relative;
+  padding-bottom: 120px;
 }
 
 /* Central Floating Control Dock */
@@ -194,8 +209,8 @@
   left: 50%;
   transform: translateX(-50%);
   z-index: 1000;
-  width: auto;
-  min-width: 680px;
+  width: min(980px, calc(100% - 32px));
+  min-width: 0;
   animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -211,13 +226,16 @@
     0 0 0 1px rgba(0, 0, 0, 0.05);
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .dock-group {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .dock-divider {
@@ -267,6 +285,40 @@
   gap: 10px;
 }
 
+/* Segmented Toggle */
+.segmented-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.segmented-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.segmented-btn:hover {
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.segmented-btn.active {
+  background: var(--bg-secondary);
+  color: var(--accent-primary);
+  box-shadow: var(--shadow-sm);
+}
+
 /* Custom Dock Dropdown */
 .dock-dropdown {
   position: relative;
@@ -288,6 +340,7 @@
   cursor: pointer;
   transition: all 0.2s;
   font-family: var(--font-family);
+  max-width: 200px;
 }
 
 .dock-dropdown-trigger:hover:not(:disabled) {
@@ -311,6 +364,9 @@
   font-weight: 600;
   color: var(--accent-primary);
   margin-left: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dock-dropdown-arrow {
@@ -650,6 +706,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .status-text {
@@ -703,42 +760,6 @@
   color: var(--text-secondary);
 }
 
-.toggle-switch-mini {
-  position: relative;
-  width: 32px;
-  height: 18px;
-}
-
-.toggle-switch-mini input { display: none; }
-
-.toggle-slider {
-  position: absolute;
-  inset: 0;
-  background: #ccc;
-  border-radius: 20px;
-  cursor: pointer;
-  transition: 0.3s;
-}
-
-.toggle-slider:before {
-  content: "";
-  position: absolute;
-  height: 14px;
-  width: 14px;
-  left: 2px;
-  bottom: 2px;
-  background: white;
-  border-radius: 50%;
-  transition: 0.3s;
-}
-
-input:checked + .toggle-slider {
-  background: var(--accent-primary);
-}
-
-input:checked + .toggle-slider:before {
-  transform: translateX(14px);
-}
 
 .error-toast {
   position: absolute;
@@ -752,6 +773,35 @@ input:checked + .toggle-slider:before {
   color: var(--error);
   font-weight: 600;
   z-index: 1000;
+}
+
+@media (max-width: 980px) {
+  .dock-divider {
+    display: none;
+  }
+
+  .dock-container {
+    padding: 10px 16px;
+  }
+}
+
+@media (max-width: 860px) {
+  .subtitle-sidebar {
+    width: 200px;
+    min-width: 180px;
+  }
+
+  .subtitle-split-content {
+    flex-direction: column;
+  }
+
+  .subtitle-col-divider {
+    display: none;
+  }
+
+  .quick-actions-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 

@@ -164,6 +164,22 @@ html, body {
   color: var(--text-muted);
 }
 
+/* Focus visibility for interactive elements */
+button:focus-visible,
+[role="button"]:focus-visible,
+.btn:focus-visible,
+.btn-icon:focus-visible,
+.btn-icon-tiny:focus-visible,
+.nav-item:focus-visible,
+.sidebar-item:focus-visible,
+.dock-dropdown-trigger:focus-visible,
+.btn-dock-action:focus-visible,
+.btn-record-main:focus-visible,
+.action-card:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
 /* Cards */
 .card {
   background: var(--bg-card);

@@ -325,6 +325,16 @@ export default function SubtitleView({
     setTranslationEnabled(newVal);
     try {
       await invoke("set_translation_enabled", { enabled: newVal });
+      // Persist to config so the next recording respects the toggle
+      const cfg = await invoke<Record<string, unknown>>("get_config");
+      const updatedCfg = {
+        ...cfg,
+        translation: {
+          ...(cfg.translation as Record<string, unknown>),
+          enabled: newVal,
+        },
+      };
+      await invoke("save_config", { config: updatedCfg });
     } catch (err) {
       console.error("Failed to toggle translation:", err);
     }
@@ -345,10 +355,6 @@ export default function SubtitleView({
             <button className="nav-item active">
               <span className="nav-icon">🎙️</span>
               实时转写
-            </button>
-            <button className="nav-item" onClick={onOpenSettings}>
-              <span className="nav-icon">⚙️</span>
-              配置中心
             </button>
           </div>
 
@@ -552,14 +558,20 @@ export default function SubtitleView({
             <div className="dock-group">
               <div className="dock-toggle-item">
                 <span className="dock-label">翻译</span>
-                <label className="toggle-switch-mini">
-                  <input
-                    type="checkbox"
-                    checked={translationEnabled}
-                    onChange={handleToggleTranslation}
-                  />
-                  <span className="toggle-slider" />
-                </label>
+                <div className="segmented-toggle">
+                  <button
+                    className={`segmented-btn ${!translationEnabled ? "active" : ""}`}
+                    onClick={() => translationEnabled && handleToggleTranslation()}
+                  >
+                    关
+                  </button>
+                  <button
+                    className={`segmented-btn ${translationEnabled ? "active" : ""}`}
+                    onClick={() => !translationEnabled && handleToggleTranslation()}
+                  >
+                    开
+                  </button>
+                </div>
               </div>
             </div>
           </div>

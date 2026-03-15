@@ -98,7 +98,7 @@ pub async fn run_asr_session(
             "turn_detection": {
                 "type": "server_vad",
                 "threshold": 0.0,
-                "silence_duration_ms": 300
+                "silence_duration_ms": config.vad_silence_ms.clamp(100, 2000)
             }
         }
     });
@@ -121,8 +121,12 @@ pub async fn run_asr_session(
                         match event_type {
                             // Intermediate transcription result
                             "conversation.item.input_audio_transcription.text" => {
-                                let text =
-                                    json["text"].as_str().unwrap_or("").to_string();
+                                // Some payloads use "text", others use "stash" for partials.
+                                let text = json["text"]
+                                    .as_str()
+                                    .or_else(|| json["stash"].as_str())
+                                    .unwrap_or("")
+                                    .to_string();
                                 if !text.is_empty() {
                                     let _ = result_tx_clone.send(AsrResult {
                                         text,

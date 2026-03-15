@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./Settings.css";
 
@@ -8,6 +8,7 @@ interface AsrConfig {
   model: string;
   sample_rate: number;
   language: string;
+  vad_silence_ms: number;
 }
 
 interface TranslationConfig {
@@ -42,6 +43,7 @@ export default function Settings({ onBack }: SettingsProps) {
       model: "qwen3-asr-flash-realtime",
       sample_rate: 16000,
       language: "zh",
+      vad_silence_ms: 300,
     },
     translation: {
       enabled: false,
@@ -93,6 +95,19 @@ export default function Settings({ onBack }: SettingsProps) {
       ...prev,
       asr: { ...prev.asr, [field]: value },
     }));
+  };
+
+  const getVadPreset = (ms: number) => {
+    if (ms <= 180) return "fast";
+    if (ms <= 350) return "balanced";
+    if (ms <= 650) return "stable";
+    return "custom";
+  };
+
+  const handleVadPresetChange = (preset: string) => {
+    if (preset === "fast") updateAsr("vad_silence_ms", 150);
+    else if (preset === "balanced") updateAsr("vad_silence_ms", 300);
+    else if (preset === "stable") updateAsr("vad_silence_ms", 500);
   };
 
   const updateTranslation = (
@@ -225,6 +240,38 @@ export default function Settings({ onBack }: SettingsProps) {
                     推荐：qwen3-asr-flash-realtime（稳定版）、qwen3-asr-flash-realtime-2026-02-10（最新快照版）
                   </span>
                 </div>
+
+                <div className="form-field">
+                  <label className="form-label">VAD 静音阈值</label>
+                  <select
+                    className="input-field"
+                    value={getVadPreset(config.asr.vad_silence_ms)}
+                    onChange={(e) => handleVadPresetChange(e.target.value)}
+                  >
+                    <option value="fast">更实时（150ms）</option>
+                    <option value="balanced">推荐（300ms）</option>
+                    <option value="stable">更稳定（500ms）</option>
+                    <option value="custom">自定义</option>
+                  </select>
+                  <input
+                    className="input-field"
+                    type="number"
+                    min={100}
+                    max={2000}
+                    step={10}
+                    value={config.asr.vad_silence_ms}
+                    onChange={(e) =>
+                      updateAsr(
+                        "vad_silence_ms",
+                        Math.min(2000, Math.max(100, Number(e.target.value)))
+                      )
+                    }
+                    placeholder="100 - 2000"
+                  />
+                  <span className="form-hint">
+                    越低越“跟口型”，但可能更抖；越高越稳定但延迟更明显。建议 150–500ms。
+                  </span>
+                </div>
               </div>
             </div>
           )}
@@ -233,85 +280,66 @@ export default function Settings({ onBack }: SettingsProps) {
             <div className="settings-section">
               <div className="settings-section-header">
                 <span className="settings-section-title">🌐 翻译服务</span>
-                <label className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={config.translation.enabled}
-                    onChange={(e) =>
-                      updateTranslation("enabled", e.target.checked)
-                    }
-                  />
-                  <span className="toggle-slider" />
-                </label>
               </div>
-              {config.translation.enabled && (
-                <div className="settings-section-body">
-                  <div className="form-field">
-                    <label className="form-label">API 地址 (Base URL)</label>
+              <div className="settings-section-body">
+                <div className="form-field">
+                  <label className="form-label">API 地址 (Base URL)</label>
+                  <input
+                    className="input-field"
+                    value={config.translation.base_url}
+                    onChange={(e) =>
+                      updateTranslation("base_url", e.target.value)
+                    }
+                    placeholder="https://api.openai.com/v1"
+                  />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">API Key</label>
+                  <div className="input-wrapper">
                     <input
                       className="input-field"
-                      value={config.translation.base_url}
+                      type={showTransKey ? "text" : "password"}
+                      value={config.translation.api_key}
                       onChange={(e) =>
-                        updateTranslation("base_url", e.target.value)
+                        updateTranslation("api_key", e.target.value)
                       }
-                      placeholder="https://api.openai.com/v1"
+                      placeholder="sk-..."
                     />
-                  </div>
-                  <div className="form-field">
-                    <label className="form-label">API Key</label>
-                    <div className="input-wrapper">
-                      <input
-                        className="input-field"
-                        type={showTransKey ? "text" : "password"}
-                        value={config.translation.api_key}
-                        onChange={(e) =>
-                          updateTranslation("api_key", e.target.value)
-                        }
-                        placeholder="sk-..."
-                      />
-                      <button
-                        className="input-icon-btn"
-                        onClick={() => setShowTransKey(!showTransKey)}
-                        title={showTransKey ? "隐藏" : "查看"}
-                      >
-                        {showTransKey ? "👁️‍🗨️" : "👁️"}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="form-field">
-                    <label className="form-label">模型名称</label>
-                    <input
-                      className="input-field"
-                      value={config.translation.model}
-                      onChange={(e) =>
-                        updateTranslation("model", e.target.value)
-                      }
-                      placeholder="gpt-4o-mini"
-                    />
-                  </div>
-                  <div className="form-field">
-                    <label className="form-label">
-                      翻译提示词 (System Prompt)
-                    </label>
-                    <textarea
-                      className="input-field"
-                      value={config.translation.system_prompt}
-                      onChange={(e) =>
-                        updateTranslation("system_prompt", e.target.value)
-                      }
-                      rows={5}
-                      placeholder="你是一个专业的翻译助手..."
-                    />
+                    <button
+                      className="input-icon-btn"
+                      onClick={() => setShowTransKey(!showTransKey)}
+                      title={showTransKey ? "隐藏" : "查看"}
+                    >
+                      {showTransKey ? "👁️‍🗨️" : "👁️"}
+                    </button>
                   </div>
                 </div>
-              )}
-              {!config.translation.enabled && (
-                <div className="settings-section-body">
-                  <div className="subtitle-empty">
-                    <div className="subtitle-empty-text">翻译服务已禁用</div>
-                  </div>
+                <div className="form-field">
+                  <label className="form-label">模型名称</label>
+                  <input
+                    className="input-field"
+                    value={config.translation.model}
+                    onChange={(e) =>
+                      updateTranslation("model", e.target.value)
+                    }
+                    placeholder="gpt-4o-mini"
+                  />
                 </div>
-              )}
+                <div className="form-field">
+                  <label className="form-label">
+                    翻译提示词 (System Prompt)
+                  </label>
+                  <textarea
+                    className="input-field"
+                    value={config.translation.system_prompt}
+                    onChange={(e) =>
+                      updateTranslation("system_prompt", e.target.value)
+                    }
+                    rows={5}
+                    placeholder="你是一个专业的翻译助手..."
+                  />
+                </div>
+              </div>
             </div>
           )}
 

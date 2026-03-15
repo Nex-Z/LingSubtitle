@@ -60,6 +60,8 @@
 /* Sidebar */
 .settings-sidebar {
   width: 200px;
+  min-width: 180px;
+  max-width: 240px;
   flex-shrink: 0;
   background: rgba(0, 0, 0, 0.02);
   border-right: 1px solid var(--border);
@@ -81,6 +83,8 @@
   cursor: pointer;
   transition: all var(--transition-fast);
   border: 1px solid transparent;
+  width: 100%;
+  justify-content: flex-start;
 }
 
 .sidebar-item:hover {
@@ -100,7 +104,8 @@
 
 /* Detail Area */
 .settings-detail {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-y: overlay;
   padding: 32px 40px;
   display: flex;
@@ -268,5 +273,30 @@
   }
   .settings-section-body {
     padding: 16px;
+  }
+}
+
+@media (max-width: 900px) {
+  .settings-content {
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .sidebar-item {
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .settings-detail {
+    padding: 20px;
   }
 }
