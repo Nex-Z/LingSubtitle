@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./Settings.css";
 
@@ -161,7 +161,6 @@ export default function Settings({ onBack }: SettingsProps) {
 
   return (
     <div className="settings-page">
-      {/* Header */}
       <div className="settings-header">
         <button className="btn-back" onClick={onBack} title="返回">
           <span>←</span>
@@ -169,9 +168,7 @@ export default function Settings({ onBack }: SettingsProps) {
         <span className="settings-title">设置</span>
       </div>
 
-      {/* Content */}
       <div className="settings-content">
-        {/* Sidebar */}
         <div className="settings-sidebar">
           <div
             className={`sidebar-item ${activeTab === "asr" ? "active" : ""}`}
@@ -181,9 +178,7 @@ export default function Settings({ onBack }: SettingsProps) {
             <span>语音识别</span>
           </div>
           <div
-            className={`sidebar-item ${
-              activeTab === "translation" ? "active" : ""
-            }`}
+            className={`sidebar-item ${activeTab === "translation" ? "active" : ""}`}
             onClick={() => setActiveTab("translation")}
           >
             <span className="sidebar-icon">🌐</span>
@@ -198,14 +193,11 @@ export default function Settings({ onBack }: SettingsProps) {
           </div>
         </div>
 
-        {/* Detail Area */}
         <div className="settings-detail">
           {activeTab === "asr" && (
             <div className="settings-section">
               <div className="settings-section-header">
-                <span className="settings-section-title">
-                  🎤 语音识别（ASR）
-                </span>
+                <span className="settings-section-title">🎤 语音识别（ASR）</span>
               </div>
               <div className="settings-section-body">
                 <div className="form-field">
@@ -320,9 +312,7 @@ export default function Settings({ onBack }: SettingsProps) {
                   <input
                     className="input-field"
                     value={config.translation.base_url}
-                    onChange={(e) =>
-                      updateTranslation("base_url", e.target.value)
-                    }
+                    onChange={(e) => updateTranslation("base_url", e.target.value)}
                     placeholder="https://api.openai.com/v1"
                   />
                 </div>
@@ -333,9 +323,7 @@ export default function Settings({ onBack }: SettingsProps) {
                       className="input-field"
                       type={showTransKey ? "text" : "password"}
                       value={config.translation.api_key}
-                      onChange={(e) =>
-                        updateTranslation("api_key", e.target.value)
-                      }
+                      onChange={(e) => updateTranslation("api_key", e.target.value)}
                       placeholder="sk-..."
                     />
                     <button
@@ -352,22 +340,16 @@ export default function Settings({ onBack }: SettingsProps) {
                   <input
                     className="input-field"
                     value={config.translation.model}
-                    onChange={(e) =>
-                      updateTranslation("model", e.target.value)
-                    }
+                    onChange={(e) => updateTranslation("model", e.target.value)}
                     placeholder="gpt-4o-mini"
                   />
                 </div>
                 <div className="form-field">
-                  <label className="form-label">
-                    翻译提示词 (System Prompt)
-                  </label>
+                  <label className="form-label">翻译提示词 (System Prompt)</label>
                   <textarea
                     className="input-field"
                     value={config.translation.system_prompt}
-                    onChange={(e) =>
-                      updateTranslation("system_prompt", e.target.value)
-                    }
+                    onChange={(e) => updateTranslation("system_prompt", e.target.value)}
                     rows={5}
                     placeholder="你是一个专业的翻译助手..."
                   />
@@ -397,7 +379,7 @@ export default function Settings({ onBack }: SettingsProps) {
                       className="input-field"
                       value={config.save.save_path}
                       onChange={(e) => updateSave("save_path", e.target.value)}
-                      placeholder="C:\Users\...\Documents\LingSubtitle"
+                      placeholder="C:\\Users\\...\\Documents\\LingSubtitle"
                     />
                     <span className="form-hint">
                       字幕文件将保存为：字幕_YYYY-MM-DD_HH-mm-ss.txt
@@ -417,7 +399,6 @@ export default function Settings({ onBack }: SettingsProps) {
         </div>
       </div>
 
-      {/* Footer */}
       <div className="settings-footer">
         <button className="btn btn-secondary" onClick={onBack}>
           取消
@@ -427,7 +408,6 @@ export default function Settings({ onBack }: SettingsProps) {
         </button>
       </div>
 
-      {/* Success Toast */}
       {showSuccess && (
         <div className="save-success">
           <span>✅</span>

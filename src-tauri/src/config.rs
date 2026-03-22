@@ -68,9 +68,9 @@ impl Default for TranslationConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            base_url: "https://api.openai.com/v1".to_string(),
+            base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
             api_key: String::new(),
-            model: "gpt-4o-mini".to_string(),
+            model: "qwen-plus".to_string(),
             system_prompt: "你是一个专业的翻译助手。请将以下文本翻译为目标语言，只输出翻译结果，不要添加任何解释或额外内容。".to_string(),
             target_language: "中文".to_string(),
         }
