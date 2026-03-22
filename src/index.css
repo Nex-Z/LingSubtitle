@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
 :root {
   /* Color Palette - Light & Bright (Apple-Inspired) */
@@ -29,7 +29,7 @@
   --border-focus: rgba(0, 113, 227, 0.4);
 
   /* Typography */
-  --font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Icons', 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
+  --font-family: 'Plus Jakarta Sans', 'SF Pro Text', 'Helvetica Neue', 'Arial', sans-serif;
   --font-mono: 'SF Mono', 'JetBrains Mono', 'Fira Code', monospace;
 
   /* Spacing */
@@ -98,9 +98,14 @@ html, body {
   border-radius: var(--radius-md);
   font-family: var(--font-family);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 700;
   cursor: pointer;
-  transition: all var(--transition-normal);
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast),
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    color var(--transition-fast);
   outline: none;
 }
 
@@ -111,7 +116,7 @@ html, body {
 }
 .btn-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 0 30px rgba(124, 106, 255, 0.35);
+  box-shadow: 0 14px 28px rgba(0, 113, 227, 0.28);
 }
 .btn-primary:active {
   transform: translateY(0);
@@ -146,15 +151,20 @@ html, body {
 /* Input Fields */
 .input-field {
   width: 100%;
-  padding: 10px 14px;
+  padding: 12px 14px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: 14px;
   color: var(--text-primary);
   font-family: var(--font-family);
   font-size: 14px;
-  transition: all var(--transition-fast);
+  line-height: 1.5;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background var(--transition-fast);
   outline: none;
+  appearance: none;
 }
 .input-field:focus {
   border-color: var(--border-focus);
@@ -162,6 +172,10 @@ html, body {
 }
 .input-field::placeholder {
   color: var(--text-muted);
+}
+
+textarea.input-field {
+  resize: vertical;
 }
 
 /* Focus visibility for interactive elements */

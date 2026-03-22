@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./Settings.css";
 
@@ -43,6 +43,93 @@ interface SettingsProps {
   onBack: () => void;
 }
 
+type SettingsTab = "asr" | "translation" | "save";
+
+function SvgIcon({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      {children}
+    </svg>
+  );
+}
+
+function ArrowLeftIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <path d="M15 18l-6-6 6-6" />
+    </SvgIcon>
+  );
+}
+
+function MicIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0" />
+      <path d="M12 18v3" />
+      <path d="M8 21h8" />
+    </SvgIcon>
+  );
+}
+
+function SparkIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z" />
+      <path d="M19 14l.9 2.1L22 17l-2.1.9L19 20l-.9-2.1L16 17l2.1-.9L19 14Z" />
+    </SvgIcon>
+  );
+}
+
+function FolderIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+    </SvgIcon>
+  );
+}
+
+function EyeIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
+      <circle cx="12" cy="12" r="3" />
+    </SvgIcon>
+  );
+}
+
+function EyeOffIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <path d="M3 3l18 18" />
+      <path d="M10.7 6.2A11.7 11.7 0 0 1 12 6c6.5 0 10 6 10 6a17.6 17.6 0 0 1-3.4 4.2" />
+      <path d="M6.2 6.3A17.5 17.5 0 0 0 2 12s3.5 6 10 6c1.2 0 2.4-.2 3.4-.5" />
+      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+    </SvgIcon>
+  );
+}
+
+const tabMeta: Record<SettingsTab, { label: string; desc: string }> = {
+  asr: { label: "语音识别", desc: "录制与识别参数" },
+  translation: { label: "翻译服务", desc: "模型与提示词" },
+  save: { label: "保存设置", desc: "自动导出与路径" },
+};
+
 export default function Settings({ onBack }: SettingsProps) {
   const [config, setConfig] = useState<AppConfig>({
     asr: {
@@ -59,40 +146,25 @@ export default function Settings({ onBack }: SettingsProps) {
       api_key: "",
       model: "gpt-4o-mini",
       system_prompt:
-        "你是一个专业的翻译助手。请将以下文本翻译为目标语言，只输出翻译结果，不要添加任何解释或额外内容。",
+        "你是一个专业的翻译助手。请将下列文本翻译为目标语言，只输出翻译结果，不要添加解释或额外内容。",
       target_language: "中文",
     },
-    save: {
-      auto_save: true,
-      save_path: "",
-    },
-    capture: {
-      source: "system",
-      app_pid: null,
-      app_name: "",
-    },
+    save: { auto_save: true, save_path: "" },
+    capture: { source: "system", app_pid: null, app_name: "" },
     filter_fillers: false,
   });
   const [showSuccess, setShowSuccess] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showAsrKey, setShowAsrKey] = useState(false);
   const [showTransKey, setShowTransKey] = useState(false);
-  const [activeTab, setActiveTab] = useState<"asr" | "translation" | "save">("asr");
+  const [activeTab, setActiveTab] = useState<SettingsTab>("asr");
 
   useEffect(() => {
-    loadConfig();
+    invoke<AppConfig>("get_config")
+      .then((cfg) => setConfig(cfg))
+      .catch((err) => console.error("Failed to load config:", err))
+      .finally(() => setLoading(false));
   }, []);
-
-  const loadConfig = async () => {
-    try {
-      const cfg = await invoke<AppConfig>("get_config");
-      setConfig(cfg);
-    } catch (err) {
-      console.error("Failed to load config:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSave = async () => {
     try {
@@ -105,10 +177,15 @@ export default function Settings({ onBack }: SettingsProps) {
   };
 
   const updateAsr = (field: keyof AsrConfig, value: string | number) => {
-    setConfig((prev) => ({
-      ...prev,
-      asr: { ...prev.asr, [field]: value },
-    }));
+    setConfig((prev) => ({ ...prev, asr: { ...prev.asr, [field]: value } }));
+  };
+
+  const updateTranslation = (field: keyof TranslationConfig, value: string | boolean) => {
+    setConfig((prev) => ({ ...prev, translation: { ...prev.translation, [field]: value } }));
+  };
+
+  const updateSave = (field: keyof SaveConfig, value: string | boolean) => {
+    setConfig((prev) => ({ ...prev, save: { ...prev.save, [field]: value } }));
   };
 
   const getVadPreset = (ms: number) => {
@@ -124,37 +201,19 @@ export default function Settings({ onBack }: SettingsProps) {
     else if (preset === "stable") updateAsr("vad_silence_ms", 500);
   };
 
-  const updateTranslation = (
-    field: keyof TranslationConfig,
-    value: string | boolean
-  ) => {
-    setConfig((prev) => ({
-      ...prev,
-      translation: { ...prev.translation, [field]: value },
-    }));
-  };
-
-  const updateSave = (field: keyof SaveConfig, value: string | boolean) => {
-    setConfig((prev) => ({
-      ...prev,
-      save: { ...prev.save, [field]: value },
-    }));
-  };
-
   if (loading) {
     return (
       <div className="settings-page">
         <div className="settings-header">
-          <button className="btn-back" onClick={onBack}>
-            <span>←</span>
+          <button type="button" className="btn-back" onClick={onBack} title="返回">
+            <ArrowLeftIcon className="header-icon" />
           </button>
-          <span className="settings-title">设置</span>
-        </div>
-        <div className="settings-content">
-          <div className="subtitle-empty" style={{ margin: "auto" }}>
-            <div className="subtitle-empty-text">加载中...</div>
+          <div>
+            <div className="settings-title">设置中心</div>
+            <div className="settings-subtitle">正在加载配置...</div>
           </div>
         </div>
+        <div className="settings-loading">正在读取本地配置，请稍候。</div>
       </div>
     );
   }
@@ -162,64 +221,66 @@ export default function Settings({ onBack }: SettingsProps) {
   return (
     <div className="settings-page">
       <div className="settings-header">
-        <button className="btn-back" onClick={onBack} title="返回">
-          <span>←</span>
-        </button>
-        <span className="settings-title">设置</span>
+        <div className="settings-header-left">
+          <button type="button" className="btn-back" onClick={onBack} title="返回">
+            <ArrowLeftIcon className="header-icon" />
+          </button>
+          <div>
+            <div className="settings-title">设置中心</div>
+            <div className="settings-subtitle">只保留必要配置，不再显示重复概览。</div>
+          </div>
+        </div>
       </div>
 
       <div className="settings-content">
-        <div className="settings-sidebar">
-          <div
-            className={`sidebar-item ${activeTab === "asr" ? "active" : ""}`}
-            onClick={() => setActiveTab("asr")}
-          >
-            <span className="sidebar-icon">🎤</span>
-            <span>语音识别</span>
-          </div>
-          <div
-            className={`sidebar-item ${activeTab === "translation" ? "active" : ""}`}
-            onClick={() => setActiveTab("translation")}
-          >
-            <span className="sidebar-icon">🌐</span>
-            <span>翻译设置</span>
-          </div>
-          <div
-            className={`sidebar-item ${activeTab === "save" ? "active" : ""}`}
-            onClick={() => setActiveTab("save")}
-          >
-            <span className="sidebar-icon">💾</span>
-            <span>保存设置</span>
-          </div>
-        </div>
+        <aside className="settings-sidebar">
+          {(Object.keys(tabMeta) as SettingsTab[]).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              className={`sidebar-item ${activeTab === tab ? "active" : ""}`}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab === "asr" && <MicIcon className="sidebar-icon" />}
+              {tab === "translation" && <SparkIcon className="sidebar-icon" />}
+              {tab === "save" && <FolderIcon className="sidebar-icon" />}
+              <span className="sidebar-copy">
+                <span className="sidebar-title">{tabMeta[tab].label}</span>
+                <span className="sidebar-desc">{tabMeta[tab].desc}</span>
+              </span>
+            </button>
+          ))}
+        </aside>
 
-        <div className="settings-detail">
+        <section className="settings-detail">
           {activeTab === "asr" && (
-            <div className="settings-section">
-              <div className="settings-section-header">
-                <span className="settings-section-title">🎤 语音识别（ASR）</span>
+            <div className="settings-panel">
+              <div className="panel-header">
+                <div>
+                  <div className="panel-title">语音识别</div>
+                  <div className="panel-desc">优化录制实时性、识别模型和 API 连接。</div>
+                </div>
               </div>
-              <div className="settings-section-body">
-                <div className="form-field">
-                  <label className="form-label">过滤单独语气词</label>
+
+              <div className="settings-form-grid">
+                <div className="form-field toggle-field">
+                  <div className="field-copy">
+                    <label className="form-label">过滤语气词</label>
+                    <span className="form-hint">仅过滤单独出现的语气词，不影响正常句子。</span>
+                  </div>
                   <label className="toggle-switch">
                     <input
                       type="checkbox"
                       checked={config.filter_fillers}
                       onChange={(e) =>
-                        setConfig((prev) => ({
-                          ...prev,
-                          filter_fillers: e.target.checked,
-                        }))
+                        setConfig((prev) => ({ ...prev, filter_fillers: e.target.checked }))
                       }
                     />
                     <span className="toggle-slider" />
                   </label>
-                  <span className="form-hint">
-                    仅过滤单独出现的语气词（如“嗯”“啊”“呃”），不会影响正常句子。
-                  </span>
                 </div>
-                <div className="form-field">
+
+                <div className="form-field span-2">
                   <label className="form-label">WebSocket 地址</label>
                   <input
                     className="input-field"
@@ -227,10 +288,8 @@ export default function Settings({ onBack }: SettingsProps) {
                     onChange={(e) => updateAsr("base_url", e.target.value)}
                     placeholder="wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
                   />
-                  <span className="form-hint">
-                    阿里云百炼 Realtime API 地址（不含 model 参数，系统自动拼接）
-                  </span>
                 </div>
+
                 <div className="form-field">
                   <label className="form-label">API Key</label>
                   <div className="input-wrapper">
@@ -242,17 +301,16 @@ export default function Settings({ onBack }: SettingsProps) {
                       placeholder="sk-..."
                     />
                     <button
+                      type="button"
                       className="input-icon-btn"
-                      onClick={() => setShowAsrKey(!showAsrKey)}
-                      title={showAsrKey ? "隐藏" : "查看"}
+                      onClick={() => setShowAsrKey((prev) => !prev)}
+                      title={showAsrKey ? "隐藏" : "显示"}
                     >
-                      {showAsrKey ? "👁️‍🗨️" : "👁️"}
+                      {showAsrKey ? <EyeOffIcon className="field-icon" /> : <EyeIcon className="field-icon" />}
                     </button>
                   </div>
-                  <span className="form-hint">
-                    百炼 API Key，获取地址：https://bailian.console.aliyun.com
-                  </span>
                 </div>
+
                 <div className="form-field">
                   <label className="form-label">模型名称</label>
                   <input
@@ -261,23 +319,24 @@ export default function Settings({ onBack }: SettingsProps) {
                     onChange={(e) => updateAsr("model", e.target.value)}
                     placeholder="qwen3-asr-flash-realtime"
                   />
-                  <span className="form-hint">
-                    推荐：qwen3-asr-flash-realtime（稳定版）、qwen3-asr-flash-realtime-2026-02-10（最新快照版）
-                  </span>
                 </div>
 
                 <div className="form-field">
-                  <label className="form-label">VAD 静音阈值</label>
+                  <label className="form-label">VAD 预设</label>
                   <select
                     className="input-field"
                     value={getVadPreset(config.asr.vad_silence_ms)}
                     onChange={(e) => handleVadPresetChange(e.target.value)}
                   >
-                    <option value="fast">更实时（150ms）</option>
-                    <option value="balanced">推荐（300ms）</option>
-                    <option value="stable">更稳定（500ms）</option>
+                    <option value="fast">更实时 (150ms)</option>
+                    <option value="balanced">推荐 (300ms)</option>
+                    <option value="stable">更稳定 (500ms)</option>
                     <option value="custom">自定义</option>
                   </select>
+                </div>
+
+                <div className="form-field">
+                  <label className="form-label">静音阈值</label>
                   <input
                     className="input-field"
                     type="number"
@@ -286,29 +345,34 @@ export default function Settings({ onBack }: SettingsProps) {
                     step={10}
                     value={config.asr.vad_silence_ms}
                     onChange={(e) =>
-                      updateAsr(
-                        "vad_silence_ms",
-                        Math.min(2000, Math.max(100, Number(e.target.value)))
-                      )
+                      updateAsr("vad_silence_ms", Math.min(2000, Math.max(100, Number(e.target.value))))
                     }
-                    placeholder="100 - 2000"
                   />
-                  <span className="form-hint">
-                    越低越“跟口型”，但可能更抖；越高越稳定但延迟更明显。建议 150–500ms。
-                  </span>
                 </div>
               </div>
             </div>
           )}
 
           {activeTab === "translation" && (
-            <div className="settings-section">
-              <div className="settings-section-header">
-                <span className="settings-section-title">🌐 翻译服务</span>
+            <div className="settings-panel">
+              <div className="panel-header">
+                <div>
+                  <div className="panel-title">翻译服务</div>
+                  <div className="panel-desc">配置模型、API 地址和翻译提示词。</div>
+                </div>
+                <label className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={config.translation.enabled}
+                    onChange={(e) => updateTranslation("enabled", e.target.checked)}
+                  />
+                  <span className="toggle-slider" />
+                </label>
               </div>
-              <div className="settings-section-body">
+
+              <div className="settings-form-grid">
                 <div className="form-field">
-                  <label className="form-label">API 地址 (Base URL)</label>
+                  <label className="form-label">API 地址</label>
                   <input
                     className="input-field"
                     value={config.translation.base_url}
@@ -316,6 +380,17 @@ export default function Settings({ onBack }: SettingsProps) {
                     placeholder="https://api.openai.com/v1"
                   />
                 </div>
+
+                <div className="form-field">
+                  <label className="form-label">目标语言</label>
+                  <input
+                    className="input-field"
+                    value={config.translation.target_language}
+                    onChange={(e) => updateTranslation("target_language", e.target.value)}
+                    placeholder="中文"
+                  />
+                </div>
+
                 <div className="form-field">
                   <label className="form-label">API Key</label>
                   <div className="input-wrapper">
@@ -327,14 +402,16 @@ export default function Settings({ onBack }: SettingsProps) {
                       placeholder="sk-..."
                     />
                     <button
+                      type="button"
                       className="input-icon-btn"
-                      onClick={() => setShowTransKey(!showTransKey)}
-                      title={showTransKey ? "隐藏" : "查看"}
+                      onClick={() => setShowTransKey((prev) => !prev)}
+                      title={showTransKey ? "隐藏" : "显示"}
                     >
-                      {showTransKey ? "👁️‍🗨️" : "👁️"}
+                      {showTransKey ? <EyeOffIcon className="field-icon" /> : <EyeIcon className="field-icon" />}
                     </button>
                   </div>
                 </div>
+
                 <div className="form-field">
                   <label className="form-label">模型名称</label>
                   <input
@@ -344,13 +421,14 @@ export default function Settings({ onBack }: SettingsProps) {
                     placeholder="gpt-4o-mini"
                   />
                 </div>
-                <div className="form-field">
-                  <label className="form-label">翻译提示词 (System Prompt)</label>
+
+                <div className="form-field span-2">
+                  <label className="form-label">系统提示词</label>
                   <textarea
-                    className="input-field"
+                    className="input-field textarea-field"
                     value={config.translation.system_prompt}
                     onChange={(e) => updateTranslation("system_prompt", e.target.value)}
-                    rows={5}
+                    rows={6}
                     placeholder="你是一个专业的翻译助手..."
                   />
                 </div>
@@ -359,9 +437,12 @@ export default function Settings({ onBack }: SettingsProps) {
           )}
 
           {activeTab === "save" && (
-            <div className="settings-section">
-              <div className="settings-section-header">
-                <span className="settings-section-title">💾 自动保存</span>
+            <div className="settings-panel">
+              <div className="panel-header">
+                <div>
+                  <div className="panel-title">自动保存</div>
+                  <div className="panel-desc">控制字幕记录是否自动导出到本地目录。</div>
+                </div>
                 <label className="toggle-switch">
                   <input
                     type="checkbox"
@@ -371,32 +452,23 @@ export default function Settings({ onBack }: SettingsProps) {
                   <span className="toggle-slider" />
                 </label>
               </div>
-              {config.save.auto_save && (
-                <div className="settings-section-body">
-                  <div className="form-field">
-                    <label className="form-label">保存路径</label>
-                    <input
-                      className="input-field"
-                      value={config.save.save_path}
-                      onChange={(e) => updateSave("save_path", e.target.value)}
-                      placeholder="C:\\Users\\...\\Documents\\LingSubtitle"
-                    />
-                    <span className="form-hint">
-                      字幕文件将保存为：字幕_YYYY-MM-DD_HH-mm-ss.txt
-                    </span>
-                  </div>
+
+              <div className="settings-form-grid">
+                <div className="form-field span-2">
+                  <label className="form-label">保存路径</label>
+                  <input
+                    className="input-field"
+                    value={config.save.save_path}
+                    onChange={(e) => updateSave("save_path", e.target.value)}
+                    placeholder="C:\\Users\\...\\Documents\\LingSubtitle"
+                    disabled={!config.save.auto_save}
+                  />
+                  <span className="form-hint">字幕文件会按时间命名，例如 字幕_YYYY-MM-DD_HH-mm-ss.txt</span>
                 </div>
-              )}
-              {!config.save.auto_save && (
-                <div className="settings-section-body">
-                  <div className="subtitle-empty">
-                    <div className="subtitle-empty-text">自动保存已禁用</div>
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
           )}
-        </div>
+        </section>
       </div>
 
       <div className="settings-footer">
@@ -408,12 +480,7 @@ export default function Settings({ onBack }: SettingsProps) {
         </button>
       </div>
 
-      {showSuccess && (
-        <div className="save-success">
-          <span>✅</span>
-          <span>设置已保存</span>
-        </div>
-      )}
+      {showSuccess && <div className="save-success">设置已保存</div>}
     </div>
   );
 }

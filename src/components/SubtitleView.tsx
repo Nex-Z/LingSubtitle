@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./SubtitleView.css";
@@ -12,6 +12,134 @@ import type {
   TranslationStatus,
 } from "../types/subtitle";
 
+type SubtitleItem = SubtitleSegmentPayload;
+
+interface SubtitleViewProps {
+  onOpenSettings: () => void;
+  onToggleFloating: () => void;
+  isFloatingOpen: boolean;
+}
+
+interface AudioApp {
+  pid: number;
+  name: string;
+  iconDataUrl?: string | null;
+}
+
+interface AppConfigResponse {
+  asr: { language: string };
+  translation: { enabled: boolean; target_language: string };
+  capture?: { source?: string; app_pid?: number };
+}
+
+function SvgIcon({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
+}
+
+function HomeIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <path d="M3 10.5L12 3l9 7.5" />
+      <path d="M5 9.5V21h14V9.5" />
+      <path d="M9 21v-6h6v6" />
+    </SvgIcon>
+  );
+}
+
+function BookIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 0 4 22Z" />
+      <path d="M8 7h8" />
+      <path d="M8 11h8" />
+    </SvgIcon>
+  );
+}
+
+function ChatIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <path d="M7 18l-4 3V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H7Z" />
+      <path d="M8 8h8" />
+      <path d="M8 12h5" />
+    </SvgIcon>
+  );
+}
+
+function MicIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0" />
+      <path d="M12 18v3" />
+      <path d="M8 21h8" />
+    </SvgIcon>
+  );
+}
+
+function LayersIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <path d="M12 4l8 4-8 4-8-4 8-4Z" />
+      <path d="M4 12l8 4 8-4" />
+      <path d="M4 16l8 4 8-4" />
+    </SvgIcon>
+  );
+}
+
+function SettingsIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <path d="M12 3l1.2 2.6 2.9.4-.9 2.8 2 2-2 2 .9 2.8-2.9.4L12 21l-1.2-2.6-2.9-.4.9-2.8-2-2 2-2-.9-2.8 2.9-.4L12 3Z" />
+      <circle cx="12" cy="12" r="3" />
+    </SvgIcon>
+  );
+}
+
+function ArrowIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <path d="M6 9l6 6 6-6" />
+    </SvgIcon>
+  );
+}
+
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <path d="M5 12l4 4L19 6" />
+    </SvgIcon>
+  );
+}
+
+function RefreshIcon({ className }: { className?: string }) {
+  return (
+    <SvgIcon className={className}>
+      <path d="M20 11a8 8 0 1 0 2 5.3" />
+      <path d="M20 4v7h-7" />
+    </SvgIcon>
+  );
+}
+
 function DockDropdown({
   label,
   options,
@@ -20,7 +148,7 @@ function DockDropdown({
   disabled,
 }: {
   label: string;
-  options: { value: string; short: string; full: string }[];
+  options: { value: string; short: string; full: string; iconDataUrl?: string | null }[];
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
@@ -34,9 +162,7 @@ function DockDropdown({
         setOpen(false);
       }
     };
-    if (open) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
+    if (open) document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [open]);
 
@@ -45,18 +171,23 @@ function DockDropdown({
   return (
     <div className={`dock-dropdown ${disabled ? "disabled" : ""}`} ref={ref}>
       <button
+        type="button"
         className="dock-dropdown-trigger"
         onClick={() => !disabled && setOpen((prev) => !prev)}
         disabled={disabled}
       >
+        {selected?.iconDataUrl ? (
+          <img className="dock-option-icon trigger" src={selected.iconDataUrl} alt="" />
+        ) : null}
         <span className="dock-dropdown-label">{label}</span>
         <span className="dock-dropdown-value">{selected?.short || value}</span>
-        <span className="dock-dropdown-arrow">{open ? "▴" : "▾"}</span>
+        <ArrowIcon className={`dock-dropdown-arrow ${open ? "open" : ""}`} />
       </button>
       {open && (
         <div className="dock-dropdown-menu">
           {options.map((option) => (
-            <div
+            <button
+              type="button"
               key={option.value}
               className={`dock-dropdown-option ${option.value === value ? "active" : ""}`}
               onClick={() => {
@@ -64,9 +195,16 @@ function DockDropdown({
                 setOpen(false);
               }}
             >
+              {option.iconDataUrl ? (
+                <img className="dock-option-icon" src={option.iconDataUrl} alt="" />
+              ) : (
+                <span className="dock-option-fallback" aria-hidden="true">
+                  {option.short.slice(0, 1)}
+                </span>
+              )}
               <span className="option-label">{option.full}</span>
-              {option.value === value && <span className="option-check">✓</span>}
-            </div>
+              {option.value === value && <CheckIcon className="option-check" />}
+            </button>
           ))}
         </div>
       )}
@@ -74,44 +212,25 @@ function DockDropdown({
   );
 }
 
-type SubtitleItem = SubtitleSegmentPayload;
-
-interface SubtitleViewProps {
-  onOpenSettings: () => void;
-  onToggleFloating: () => void;
-  isFloatingOpen: boolean;
-}
-
-interface AudioApp {
-  pid: number;
-  name: string;
-}
-
-interface AppConfigResponse {
-  asr: { language: string };
-  translation: { enabled: boolean; target_language: string };
-  capture?: { source?: string; app_pid?: number };
-}
-
 const asrLanguages = [
   { value: "auto", short: "自动", full: "自动识别" },
   { value: "zh", short: "中文", full: "中文" },
   { value: "en", short: "英语", full: "英语 (English)" },
-  { value: "ja", short: "日语", full: "日语 (日本語)" },
+  { value: "ja", short: "日语", full: "日语 (日本语)" },
   { value: "ko", short: "韩语", full: "韩语 (한국어)" },
   { value: "de", short: "德语", full: "德语 (Deutsch)" },
-  { value: "fr", short: "法语", full: "法语 (Français)" },
-  { value: "es", short: "西班牙语", full: "西班牙语 (Español)" },
+  { value: "fr", short: "法语", full: "法语 (Francais)" },
+  { value: "es", short: "西语", full: "西班牙语 (Espanol)" },
 ];
 
 const translationLanguages = [
   { value: "中文", short: "中文", full: "中文" },
   { value: "English", short: "英语", full: "英语 (English)" },
-  { value: "日本語", short: "日语", full: "日语 (日本語)" },
+  { value: "日本語", short: "日语", full: "日语 (日本语)" },
   { value: "한국어", short: "韩语", full: "韩语 (한국어)" },
   { value: "Deutsch", short: "德语", full: "德语 (Deutsch)" },
-  { value: "Français", short: "法语", full: "法语 (Français)" },
-  { value: "Español", short: "西班牙语", full: "西班牙语 (Español)" },
+  { value: "Francais", short: "法语", full: "法语 (Francais)" },
+  { value: "Espanol", short: "西语", full: "西班牙语 (Espanol)" },
 ];
 
 const captureSources = [
@@ -126,7 +245,6 @@ function upsertSubtitle(items: SubtitleItem[], payload: SubtitleSegmentPayload):
   if (index === -1) {
     return [...items, payload].sort((left, right) => left.segmentId - right.segmentId);
   }
-
   const next = [...items];
   next[index] = { ...next[index], ...payload };
   return next;
@@ -152,9 +270,7 @@ function canShowDraftAsMain(item: SubtitleItem): boolean {
 }
 
 function formatError(payload: SubtitleErrorPayload | string): string {
-  if (typeof payload === "string") {
-    return payload;
-  }
+  if (typeof payload === "string") return payload;
   const scopeMap: Record<string, string> = {
     translation: "翻译",
     asr: "识别",
@@ -163,7 +279,7 @@ function formatError(payload: SubtitleErrorPayload | string): string {
   };
   const scope = scopeMap[payload.scope] || "系统";
   const suffix = payload.errorKind ? ` (${payload.errorKind})` : "";
-  return `${scope}错误${suffix}：${payload.message}`;
+  return `${scope}错误${suffix}: ${payload.message}`;
 }
 
 function getDisplayMode(
@@ -180,15 +296,8 @@ function getDisplayMode(
   const translationStatus: TranslationStatus = item.translationStatus || "idle";
 
   if (!translationEnabled) {
-    return {
-      mainLabel: "原文",
-      mainText: item.originalText || "正在识别...",
-      subLabel: "",
-      subText: "",
-      showSub: false,
-    };
+    return { mainLabel: "原文", mainText: item.originalText || "正在识别...", subLabel: "", subText: "", showSub: false };
   }
-
   if (item.translationError || translationStatus === "failed") {
     return {
       mainLabel: "原文",
@@ -198,44 +307,29 @@ function getDisplayMode(
       showSub: true,
     };
   }
-
   if (item.state === "streaming") {
-    return {
-      mainLabel: "原文",
-      mainText: item.originalText || "正在识别...",
-      subLabel: "",
-      subText: "",
-      showSub: false,
-    };
+    return { mainLabel: "原文", mainText: item.originalText || "正在识别...", subLabel: "", subText: "", showSub: false };
   }
-
   if (item.translatedText || canShowDraftAsMain(item)) {
-    return {
-      mainLabel: "译文",
-      mainText: translated,
-      subLabel: "原文",
-      subText: item.originalText,
-      showSub: true,
-    };
+    return { mainLabel: "译文", mainText: translated, subLabel: "原文", subText: item.originalText, showSub: true };
   }
-
   if (translationStatus === "streaming") {
-    return {
-      mainLabel: "原文",
-      mainText: item.originalText,
-      subLabel: "译文",
-      subText: "翻译生成中...",
-      showSub: true,
-    };
+    return { mainLabel: "原文", mainText: item.originalText, subLabel: "译文", subText: "翻译生成中...", showSub: true };
   }
+  return { mainLabel: "原文", mainText: item.originalText, subLabel: "译文", subText: "等待翻译...", showSub: true };
+}
 
-  return {
-    mainLabel: "原文",
-    mainText: item.originalText,
-    subLabel: "译文",
-    subText: "等待翻译...",
-    showSub: true,
-  };
+function formatTime(seconds: number) {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  return [
+    hrs > 0 ? hrs.toString().padStart(2, "0") : null,
+    mins.toString().padStart(2, "0"),
+    secs.toString().padStart(2, "0"),
+  ]
+    .filter(Boolean)
+    .join(":");
 }
 
 export default function SubtitleView({
@@ -259,12 +353,16 @@ export default function SubtitleView({
     audioApps.length > 0
       ? audioApps.map((app) => ({
           value: String(app.pid),
-          short: `${app.name} (${app.pid})`,
+          short: app.name,
           full: `${app.name} (PID ${app.pid})`,
+          iconDataUrl: app.iconDataUrl,
         }))
-      : [{ value: "", short: "无", full: "无可记录的音频" }];
+      : [{ value: "", short: "无应用", full: "暂无可录制的应用" }];
 
   const selectedAppValue = selectedAppPid ? String(selectedAppPid) : "";
+  const latestSubtitle = subtitles[subtitles.length - 1];
+  const isWelcomeState = subtitles.length === 0;
+  const headerStatusText = isRecording ? `录制中 ${formatTime(elapsedTime)}` : "准备就绪";
 
   useEffect(() => {
     let interval: number | undefined;
@@ -295,7 +393,6 @@ export default function SubtitleView({
     const unlistenUpsert = listen<SubtitleSegmentPayload>("subtitle-segment-upsert", (event) => {
       setSubtitles((prev) => upsertSubtitle(prev, event.payload));
     });
-
     const unlistenStarted = listen<SubtitleTranslationStartedPayload>(
       "subtitle-segment-translation-started",
       (event) => {
@@ -309,7 +406,6 @@ export default function SubtitleView({
         );
       }
     );
-
     const unlistenDelta = listen<SubtitleTranslationDeltaPayload>(
       "subtitle-segment-translation-delta",
       (event) => {
@@ -323,7 +419,6 @@ export default function SubtitleView({
         );
       }
     );
-
     const unlistenFinished = listen<SubtitleTranslationPayload>(
       "subtitle-segment-translation-finished",
       (event) => {
@@ -338,7 +433,6 @@ export default function SubtitleView({
         );
       }
     );
-
     const unlistenFailed = listen<SubtitleTranslationFailedPayload>(
       "subtitle-segment-translation-failed",
       (event) => {
@@ -352,7 +446,6 @@ export default function SubtitleView({
         );
       }
     );
-
     const unlistenError = listen<SubtitleErrorPayload>("subtitle-error", (event) => {
       setError(formatError(event.payload));
       window.setTimeout(() => setError(null), 5000);
@@ -369,10 +462,27 @@ export default function SubtitleView({
   }, []);
 
   useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
-    }
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [subtitles]);
+
+  const saveCaptureConfig = async (source: "system" | "app", pid: number | null, name: string) => {
+    try {
+      const cfg = await invoke<Record<string, unknown>>("get_config");
+      await invoke("save_config", {
+        config: {
+          ...cfg,
+          capture: {
+            ...((cfg.capture as Record<string, unknown>) || {}),
+            source,
+            app_pid: pid,
+            app_name: name,
+          },
+        },
+      });
+    } catch (err) {
+      console.error("Failed to save capture config:", err);
+    }
+  };
 
   const refreshAudioApps = async () => {
     try {
@@ -396,46 +506,8 @@ export default function SubtitleView({
   }, []);
 
   useEffect(() => {
-    if (captureSource === "app") {
-      refreshAudioApps();
-    }
+    if (captureSource === "app") refreshAudioApps();
   }, [captureSource]);
-
-  const formatTime = (seconds: number) => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return [
-      hrs > 0 ? hrs.toString().padStart(2, "0") : null,
-      mins.toString().padStart(2, "0"),
-      secs.toString().padStart(2, "0"),
-    ]
-      .filter(Boolean)
-      .join(":");
-  };
-
-  const saveCaptureConfig = async (
-    source: "system" | "app",
-    pid: number | null,
-    name: string
-  ) => {
-    try {
-      const cfg = await invoke<Record<string, unknown>>("get_config");
-      await invoke("save_config", {
-        config: {
-          ...cfg,
-          capture: {
-            ...((cfg.capture as Record<string, unknown>) || {}),
-            source,
-            app_pid: pid,
-            app_name: name,
-          },
-        },
-      });
-    } catch (err) {
-      console.error("Failed to save capture config:", err);
-    }
-  };
 
   const handleAsrLanguageChange = async (language: string) => {
     setAsrLanguage(language);
@@ -444,10 +516,7 @@ export default function SubtitleView({
       await invoke("save_config", {
         config: {
           ...cfg,
-          asr: {
-            ...(cfg.asr as Record<string, unknown>),
-            language,
-          },
+          asr: { ...(cfg.asr as Record<string, unknown>), language },
         },
       });
     } catch (err) {
@@ -462,10 +531,7 @@ export default function SubtitleView({
       await invoke("save_config", {
         config: {
           ...cfg,
-          translation: {
-            ...(cfg.translation as Record<string, unknown>),
-            target_language: language,
-          },
+          translation: { ...(cfg.translation as Record<string, unknown>), target_language: language },
         },
       });
     } catch (err) {
@@ -479,7 +545,6 @@ export default function SubtitleView({
 
     let nextPid = selectedAppPid;
     let nextName = audioApps.find((app) => app.pid === selectedAppPid)?.name || "";
-
     if (nextSource === "app") {
       if (!nextPid || !audioApps.some((app) => app.pid === nextPid)) {
         const first = audioApps[0];
@@ -491,7 +556,6 @@ export default function SubtitleView({
       nextPid = null;
       nextName = "";
     }
-
     await saveCaptureConfig(nextSource, nextPid, nextName);
   };
 
@@ -509,13 +573,11 @@ export default function SubtitleView({
         setIsRecording(false);
         return;
       }
-
       if (captureSource === "app" && !selectedAppPid) {
         setError("请选择要录制的应用");
         window.setTimeout(() => setError(null), 5000);
         return;
       }
-
       await invoke("start_capture");
       setSubtitles([]);
       setIsRecording(true);
@@ -548,10 +610,7 @@ export default function SubtitleView({
       await invoke("save_config", {
         config: {
           ...cfg,
-          translation: {
-            ...(cfg.translation as Record<string, unknown>),
-            enabled: next,
-          },
+          translation: { ...(cfg.translation as Record<string, unknown>), enabled: next },
         },
       });
     } catch (err) {
@@ -569,27 +628,29 @@ export default function SubtitleView({
 
         <nav className="sidebar-nav">
           <div className="nav-group">
-            <div className="nav-label">主要</div>
-            <button className="nav-item active">
-              <span className="nav-icon">🎙️</span>
+            <div className="nav-label">工作台</div>
+            <button type="button" className="nav-item active">
+              <HomeIcon className="nav-icon" />
               实时转写
             </button>
           </div>
 
           <div className="nav-group">
-            <div className="nav-label">支持</div>
+            <div className="nav-label">帮助</div>
             <button
+              type="button"
               className="nav-item"
               onClick={() => window.open("https://github.com/Nex-Z/LingSubtitle", "_blank")}
             >
-              <span className="nav-icon">📖</span>
+              <BookIcon className="nav-icon" />
               使用指南
             </button>
             <button
+              type="button"
               className="nav-item"
               onClick={() => window.open("https://github.com/Nex-Z/LingSubtitle/issues", "_blank")}
             >
-              <span className="nav-icon">💬</span>
+              <ChatIcon className="nav-icon" />
               反馈建议
             </button>
           </div>
@@ -597,8 +658,8 @@ export default function SubtitleView({
 
         <div className="sidebar-footer">
           <div className="usage-card">
-            <div className="usage-title">DashScope ASR</div>
-            <div className="usage-status">已连接</div>
+            <div className="usage-title">服务状态</div>
+            <div className="usage-status">DashScope ASR 已连接</div>
           </div>
         </div>
       </aside>
@@ -608,103 +669,118 @@ export default function SubtitleView({
           <div className="header-left">
             <div className="status-indicator">
               <div className={`status-dot ${isRecording ? "active" : ""}`} />
-              <span className="status-text">{isRecording ? formatTime(elapsedTime) : "系统就绪"}</span>
+              <span className="status-text">{headerStatusText}</span>
             </div>
           </div>
 
           <div className="header-drag-area" />
 
           <div className="header-right">
-            <button className="btn-icon-tiny" onClick={onOpenSettings} title="设置">
-              ⚙️
+            <button type="button" className="btn-icon-tiny" onClick={onOpenSettings} title="设置">
+              <SettingsIcon className="btn-icon-svg" />
             </button>
           </div>
         </div>
 
-        <div className="subtitle-content-area" ref={listRef}>
+        <div
+          className={`subtitle-content-area ${isWelcomeState ? "welcome-mode" : "stream-mode"}`}
+          ref={listRef}
+        >
+          <div className="content-backdrop" />
+
           {subtitles.length === 0 && !isRecording ? (
             <div className="welcome-panel">
               <div className="welcome-hero">
-                <div className="hero-icon">🎙️</div>
-                <h1>欢迎使用 灵幕</h1>
-                <p>专业的实时语音转写与翻译工具，让沟通无国界</p>
+                <h1>实时字幕、翻译和悬浮窗，放在一个更轻的工作流里</h1>
+                <p>开始录制后，这里会持续显示最新字幕。更多参数放到底部控制台和设置页，不再重复堆叠。</p>
               </div>
 
               <div className="quick-actions-grid">
-                <div className="action-card" onClick={handleToggleRecord}>
-                  <div className="action-icon">🎤</div>
-                  <div className="action-info">
-                    <h3>开始录音</h3>
-                    <p>立即捕获系统音频并开启实时转写</p>
+                <button type="button" className="action-card primary" onClick={handleToggleRecord}>
+                  <div className="action-icon">
+                    <MicIcon className="action-icon-svg" />
                   </div>
-                </div>
-                <div className="action-card" onClick={onOpenSettings}>
-                  <div className="action-icon">🔧</div>
+                  <div className="action-info">
+                    <h3>开始录制</h3>
+                    <p>立即捕获当前音频并开启实时字幕流。</p>
+                  </div>
+                </button>
+                <button type="button" className="action-card" onClick={onOpenSettings}>
+                  <div className="action-icon">
+                    <SettingsIcon className="action-icon-svg" />
+                  </div>
                   <div className="action-info">
                     <h3>配置服务</h3>
-                    <p>管理您的阿里云 ASR 与翻译密钥</p>
+                    <p>管理识别、翻译与保存设置。</p>
                   </div>
-                </div>
-                <div className="action-card" onClick={onToggleFloating}>
-                  <div className="action-icon">🖥️</div>
+                </button>
+                <button type="button" className="action-card" onClick={onToggleFloating}>
+                  <div className="action-icon">
+                    <LayersIcon className="action-icon-svg" />
+                  </div>
                   <div className="action-info">
-                    <h3>悬浮窗口</h3>
-                    <p>在其他窗口之上显示实时字幕条</p>
+                    <h3>{isFloatingOpen ? "关闭悬浮窗" : "打开悬浮窗"}</h3>
+                    <p>在其他窗口上方显示实时字幕条。</p>
                   </div>
-                </div>
-              </div>
-
-              <div className="recent-activity-placeholder">
-                <div className="section-header">
-                  <span>最近活动</span>
-                  <button className="btn-text-only">查看全部</button>
-                </div>
-                <div className="empty-hint-box">暂无最近记录。开始一次录制后，这里将显示您的转写历史</div>
+                </button>
               </div>
             </div>
           ) : subtitles.length === 0 ? (
             <div className="subtitle-empty">
-              <div className="subtitle-empty-icon animate-pulse">🎙️</div>
-              <div className="subtitle-empty-text">正在聆听您的声音...</div>
-              <div className="subtitle-empty-hint">实时音频捕获已开启</div>
+              <div className="subtitle-empty-icon animate-pulse">
+                <MicIcon className="empty-state-icon" />
+              </div>
+              <div className="subtitle-empty-text">正在监听当前音频...</div>
+              <div className="subtitle-empty-hint">首条字幕出现后会自动滚动到最新内容。</div>
             </div>
           ) : (
-            <div className="subtitle-list-inner">
-              {subtitles.map((item) => {
-                const display = getDisplayMode(item, translationEnabled);
-                return (
-                  <div
-                    key={`${item.segmentId}-${item.revision}`}
-                    className={`subtitle-entry ${item.state === "streaming" ? "streaming" : ""}`}
-                  >
-                    <div className="subtitle-header">
-                      <span className="subtitle-time">{item.timestamp}</span>
-                      {item.state === "streaming" && <span className="streaming-indicator">进行中</span>}
-                    </div>
-
-                    <div className="subtitle-split-content">
-                      <div
-                        className={`subtitle-col ${
-                          display.mainLabel === "译文" ? "translated" : "original"
-                        }`}
-                      >
-                        <div className="subtitle-label">{display.mainLabel}</div>
-                        <div className="subtitle-text">{display.mainText}</div>
-                      </div>
-                      {display.showSub && (
-                        <>
-                          <div className="subtitle-col-divider" />
-                          <div className="subtitle-col original ref-text">
-                            <div className="subtitle-label">{display.subLabel}</div>
-                            <div className="subtitle-text">{display.subText}</div>
-                          </div>
-                        </>
-                      )}
-                    </div>
+            <div className="subtitle-list-shell">
+              <div className="subtitle-stream-overview">
+                <div>
+                  <div className="subtitle-stream-title">实时字幕流</div>
+                  <div className="subtitle-stream-desc">录制过程中会自动追踪最新片段。</div>
+                </div>
+                {latestSubtitle && (
+                  <div className="subtitle-stream-meta">
+                    <span className="meta-chip">最新时间 {latestSubtitle.timestamp}</span>
+                    <span className="meta-chip">{translationEnabled ? "双语显示" : "原文显示"}</span>
                   </div>
-                );
-              })}
-              <div className="list-padding-bottom" />
+                )}
+              </div>
+
+              <div className="subtitle-list-inner">
+                {subtitles.map((item) => {
+                  const display = getDisplayMode(item, translationEnabled);
+                  return (
+                    <div
+                      key={`${item.segmentId}-${item.revision}`}
+                      className={`subtitle-entry ${item.state === "streaming" ? "streaming" : ""}`}
+                    >
+                      <div className="subtitle-header">
+                        <span className="subtitle-time">{item.timestamp}</span>
+                        {item.state === "streaming" && <span className="streaming-indicator">进行中</span>}
+                      </div>
+
+                      <div className="subtitle-split-content">
+                        <div className={`subtitle-col ${display.mainLabel === "译文" ? "translated" : "original"}`}>
+                          <div className="subtitle-label">{display.mainLabel}</div>
+                          <div className="subtitle-text">{display.mainText}</div>
+                        </div>
+                        {display.showSub && (
+                          <>
+                            <div className="subtitle-col-divider" />
+                            <div className="subtitle-col original ref-text">
+                              <div className="subtitle-label">{display.subLabel}</div>
+                              <div className="subtitle-text">{display.subText}</div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="list-padding-bottom" />
+              </div>
             </div>
           )}
         </div>
@@ -713,11 +789,12 @@ export default function SubtitleView({
           <div className="dock-container">
             <div className="dock-group">
               <button
+                type="button"
                 className={`btn-dock-action ${isFloatingOpen ? "active" : ""}`}
                 onClick={onToggleFloating}
                 title={isFloatingOpen ? "关闭悬浮窗" : "开启悬浮窗"}
               >
-                <span className="dock-icon">📺</span>
+                <LayersIcon className="dock-icon" />
                 <span className="dock-label">悬浮窗</span>
               </button>
             </div>
@@ -726,7 +803,7 @@ export default function SubtitleView({
 
             <div className="dock-group">
               <DockDropdown
-                label="音频源"
+                label="音频来源"
                 options={captureSources}
                 value={captureSource}
                 onChange={handleCaptureSourceChange}
@@ -746,12 +823,13 @@ export default function SubtitleView({
                     disabled={isRecording || audioApps.length === 0}
                   />
                   <button
+                    type="button"
                     className="dock-refresh-btn"
                     onClick={refreshAudioApps}
                     title="刷新应用列表"
                     disabled={isRecording}
                   >
-                    R
+                    <RefreshIcon className="dock-refresh-icon" />
                   </button>
                 </div>
               </>
@@ -761,7 +839,7 @@ export default function SubtitleView({
 
             <div className="dock-group">
               <DockDropdown
-                label="🎤 识别"
+                label="识别语言"
                 options={asrLanguages}
                 value={asrLanguage}
                 onChange={handleAsrLanguageChange}
@@ -771,17 +849,21 @@ export default function SubtitleView({
 
             <div className="dock-divider" />
 
-            <button className={`btn-record-main ${isRecording ? "recording" : "idle"}`} onClick={handleToggleRecord}>
+            <button
+              type="button"
+              className={`btn-record-main ${isRecording ? "recording" : "idle"}`}
+              onClick={handleToggleRecord}
+            >
               <div className="record-pulse-ring" />
               <div className="record-inner-icon" />
-              <span className="record-main-label">{isRecording ? "停止录制" : "开始录音"}</span>
+              <span className="record-main-label">{isRecording ? "停止录制" : "开始录制"}</span>
             </button>
 
             <div className="dock-divider" />
 
             <div className="dock-group">
               <DockDropdown
-                label="🌐 译为"
+                label="翻译目标"
                 options={translationLanguages}
                 value={targetLanguage}
                 onChange={handleTargetLanguageChange}
@@ -796,12 +878,14 @@ export default function SubtitleView({
                 <span className="dock-label">翻译</span>
                 <div className="segmented-toggle">
                   <button
+                    type="button"
                     className={`segmented-btn ${!translationEnabled ? "active" : ""}`}
                     onClick={() => translationEnabled && handleToggleTranslation()}
                   >
                     关
                   </button>
                   <button
+                    type="button"
                     className={`segmented-btn ${translationEnabled ? "active" : ""}`}
                     onClick={() => !translationEnabled && handleToggleTranslation()}
                   >
@@ -814,7 +898,7 @@ export default function SubtitleView({
         </div>
       </main>
 
-      {error && <div className="error-toast">⚠️ {error}</div>}
+      {error && <div className="error-toast">提示: {error}</div>}
     </div>
   );
 }

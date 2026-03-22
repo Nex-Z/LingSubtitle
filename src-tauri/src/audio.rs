@@ -8,11 +8,24 @@ use tokio::sync::mpsc;
 #[cfg(target_os = "windows")]
 use std::collections::HashSet;
 #[cfg(target_os = "windows")]
+use std::io::Cursor;
+#[cfg(target_os = "windows")]
 use std::path::Path;
+#[cfg(target_os = "windows")]
+use base64::Engine;
+#[cfg(target_os = "windows")]
+use image::codecs::png::PngEncoder;
+#[cfg(target_os = "windows")]
+use image::{ColorType, ImageEncoder};
 #[cfg(target_os = "windows")]
 use windows::core::{implement, Interface, PCWSTR, HRESULT};
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::CloseHandle;
+#[cfg(target_os = "windows")]
+use windows::Win32::Graphics::Gdi::{
+    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
+    BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
+};
 #[cfg(target_os = "windows")]
 use windows::Win32::Media::Audio::*;
 #[cfg(target_os = "windows")]
@@ -31,6 +44,10 @@ use windows::Win32::System::Com::StructuredStorage::InitPropVariantFromBuffer;
 use windows::Win32::System::ProcessStatus::K32GetProcessImageFileNameW;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, DrawIconEx, DI_NORMAL};
 
 const TARGET_SAMPLE_RATE: u32 = 16000;
 // Simple noise gate to reduce low-level background noise.
@@ -217,9 +234,11 @@ impl AudioCapture {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AudioApp {
     pub pid: u32,
     pub name: String,
+    pub icon_data_url: Option<String>,
 }
 
 #[cfg(target_os = "windows")]
@@ -259,11 +278,16 @@ pub fn list_audio_apps() -> Result<Vec<AudioApp>, String> {
                 continue;
             }
 
-            if let Some(name) = process_name_from_pid(pid) {
+            if let Some(path) = process_path_from_pid(pid) {
+                let name = process_name_from_path(&path);
                 if name.eq_ignore_ascii_case("audiodg.exe") {
                     continue;
                 }
-                apps.push(AudioApp { pid, name });
+                apps.push(AudioApp {
+                    pid,
+                    name,
+                    icon_data_url: process_icon_data_url(&path),
+                });
             }
         }
 
@@ -279,7 +303,7 @@ pub fn list_audio_apps() -> Result<Vec<AudioApp>, String> {
 }
 
 #[cfg(target_os = "windows")]
-fn process_name_from_pid(pid: u32) -> Option<String> {
+fn process_path_from_pid(pid: u32) -> Option<String> {
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
         let mut buf = vec![0u16; 260];
@@ -288,10 +312,110 @@ fn process_name_from_pid(pid: u32) -> Option<String> {
         if len == 0 {
             return None;
         }
-        let path = String::from_utf16_lossy(&buf[..len]);
-        Path::new(&path)
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
+        Some(String::from_utf16_lossy(&buf[..len]))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn process_name_from_path(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn process_icon_data_url(path: &str) -> Option<String> {
+    unsafe {
+        let wide_path: Vec<u16> = Path::new(path)
+            .as_os_str()
+            .to_string_lossy()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let mut file_info = SHFILEINFOW::default();
+        let result = SHGetFileInfoW(
+            PCWSTR(wide_path.as_ptr()),
+            windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut file_info),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON | SHGFI_LARGEICON,
+        );
+        if result == 0 || file_info.hIcon.is_invalid() {
+            return None;
+        }
+
+        let png_bytes = render_icon_to_png(file_info.hIcon, 32, 32);
+        let _ = DestroyIcon(file_info.hIcon);
+        png_bytes.map(|bytes| {
+            format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            )
+        })
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn render_icon_to_png(
+    icon: windows::Win32::UI::WindowsAndMessaging::HICON,
+    width: i32,
+    height: i32,
+) -> Option<Vec<u8>> {
+    unsafe {
+        let dc = CreateCompatibleDC(None);
+        if dc.is_invalid() {
+            return None;
+        }
+
+        let mut pixels: *mut std::ffi::c_void = std::ptr::null_mut();
+        let mut bitmap_info = BITMAPINFO::default();
+        bitmap_info.bmiHeader = BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width,
+            biHeight: -height,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        };
+
+        let bitmap =
+            CreateDIBSection(dc, &bitmap_info, DIB_RGB_COLORS, &mut pixels, None, 0).ok()?;
+        if bitmap.is_invalid() || pixels.is_null() {
+            let _ = DeleteDC(dc);
+            return None;
+        }
+
+        let old_bitmap = SelectObject(dc, HGDIOBJ(bitmap.0));
+        let draw_ok = DrawIconEx(dc, 0, 0, icon, width, height, 0, None, DI_NORMAL).is_ok();
+
+        let result = if draw_ok {
+            let pixel_len = (width * height * 4) as usize;
+            let bgra = std::slice::from_raw_parts(pixels as *const u8, pixel_len);
+            let mut rgba = Vec::with_capacity(pixel_len);
+            for chunk in bgra.chunks_exact(4) {
+                rgba.push(chunk[2]);
+                rgba.push(chunk[1]);
+                rgba.push(chunk[0]);
+                rgba.push(chunk[3]);
+            }
+
+            let mut png = Vec::new();
+            let mut cursor = Cursor::new(&mut png);
+            PngEncoder::new(&mut cursor)
+                .write_image(&rgba, width as u32, height as u32, ColorType::Rgba8.into())
+                .ok()
+                .map(|_| png)
+        } else {
+            None
+        };
+
+        let _ = SelectObject(dc, old_bitmap);
+        let _ = DeleteObject(bitmap);
+        let _ = DeleteDC(dc);
+        result
     }
 }
 
