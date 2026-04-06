@@ -2,13 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./FloatingSubtitle.css";
-import type {
-  SubtitleSegmentPayload,
-  SubtitleTranslationDeltaPayload,
-  SubtitleTranslationFailedPayload,
-  SubtitleTranslationPayload,
-  SubtitleTranslationStartedPayload,
-} from "../types/subtitle";
+import type { SubtitleSegmentPayload } from "../types/subtitle";
 
 interface FloatingSettings {
   fontSize: number;
@@ -37,6 +31,16 @@ function upsertSegment(
   payload: SubtitleSegmentPayload
 ): FloatingSegment[] {
   const now = Date.now();
+  if (segments.length > 0 && segments[0].sessionId !== payload.sessionId) {
+    return [
+      {
+        ...payload,
+        firstSeenAt: now,
+        lastUpdatedAt: now,
+        stateChangedAt: now,
+      },
+    ];
+  }
   const index = segments.findIndex((item) => item.segmentId === payload.segmentId);
   if (index === -1) {
     return [
@@ -62,17 +66,6 @@ function upsertSegment(
   return next;
 }
 
-function updateSegment(
-  segments: FloatingSegment[],
-  segmentId: number,
-  revision: number,
-  updater: (segment: FloatingSegment) => FloatingSegment
-): FloatingSegment[] {
-  return segments.map((segment) =>
-    segment.segmentId === segmentId && segment.revision === revision ? updater(segment) : segment
-  );
-}
-
 function charLen(text?: string | null): number {
   return (text || "").length;
 }
@@ -83,7 +76,7 @@ function translatedMain(segment: FloatingSegment | null): string {
 }
 
 function shouldShowTranslation(segment: FloatingSegment | null): boolean {
-  if (!segment || segment.state === "streaming") return false;
+  if (!segment) return false;
   return Boolean(segment.translatedText) || charLen(segment.translatedDraftText) >= DRAFT_SWITCH_CHARS;
 }
 
@@ -124,10 +117,6 @@ export default function FloatingSubtitle() {
 
   useEffect(() => {
     let unlistenUpsert: UnlistenFn | null = null;
-    let unlistenStarted: UnlistenFn | null = null;
-    let unlistenDelta: UnlistenFn | null = null;
-    let unlistenFinished: UnlistenFn | null = null;
-    let unlistenFailed: UnlistenFn | null = null;
 
     const setupListeners = async () => {
       try {
@@ -135,6 +124,12 @@ export default function FloatingSubtitle() {
           setSegments((prev) => {
             const previous = prev.find((item) => item.segmentId === event.payload.segmentId);
             const next = upsertSegment(prev, event.payload);
+
+            if (prev.length > 0 && prev[0].sessionId !== event.payload.sessionId) {
+              setDisplaySegmentId(event.payload.segmentId);
+              setHandoffUntil(0);
+              return next;
+            }
 
             if (previous?.state === "streaming" && event.payload.state !== "streaming") {
               setDisplaySegmentId(event.payload.segmentId);
@@ -146,67 +141,6 @@ export default function FloatingSubtitle() {
             return next;
           });
         });
-
-        unlistenStarted = await listen<SubtitleTranslationStartedPayload>(
-          "subtitle-segment-translation-started",
-          (event) => {
-            setSegments((prev) =>
-              updateSegment(prev, event.payload.segmentId, event.payload.revision, (segment) => ({
-                ...segment,
-                translationStatus: "streaming",
-                translatedDraftText: segment.translatedDraftText ?? "",
-                translationError: false,
-                lastUpdatedAt: Date.now(),
-              }))
-            );
-          }
-        );
-
-        unlistenDelta = await listen<SubtitleTranslationDeltaPayload>(
-          "subtitle-segment-translation-delta",
-          (event) => {
-            setSegments((prev) =>
-              updateSegment(prev, event.payload.segmentId, event.payload.revision, (segment) => ({
-                ...segment,
-                translationStatus: "streaming",
-                translatedDraftText: event.payload.accumulatedText,
-                translationError: false,
-                lastUpdatedAt: Date.now(),
-              }))
-            );
-          }
-        );
-
-        unlistenFinished = await listen<SubtitleTranslationPayload>(
-          "subtitle-segment-translation-finished",
-          (event) => {
-            setSegments((prev) =>
-              updateSegment(prev, event.payload.segmentId, event.payload.revision, (segment) => ({
-                ...segment,
-                translatedText: event.payload.translatedText,
-                translatedDraftText: null,
-                translationStatus: "completed",
-                translationError: false,
-                lastUpdatedAt: Date.now(),
-              }))
-            );
-          }
-        );
-
-        unlistenFailed = await listen<SubtitleTranslationFailedPayload>(
-          "subtitle-segment-translation-failed",
-          (event) => {
-            setSegments((prev) =>
-              updateSegment(prev, event.payload.segmentId, event.payload.revision, (segment) => ({
-                ...segment,
-                translationStatus: "failed",
-                translatedDraftText: null,
-                translationError: true,
-                lastUpdatedAt: Date.now(),
-              }))
-            );
-          }
-        );
       } catch (err) {
         console.error("Failed to attach listeners:", err);
       }
@@ -216,10 +150,6 @@ export default function FloatingSubtitle() {
 
     return () => {
       if (unlistenUpsert) unlistenUpsert();
-      if (unlistenStarted) unlistenStarted();
-      if (unlistenDelta) unlistenDelta();
-      if (unlistenFinished) unlistenFinished();
-      if (unlistenFailed) unlistenFailed();
     };
   }, [displaySegmentId]);
 
@@ -239,7 +169,12 @@ export default function FloatingSubtitle() {
 
     const latestCommitted = [...segments]
       .filter((segment) => segment.state !== "streaming")
-      .sort((left, right) => right.lastUpdatedAt - left.lastUpdatedAt)[0];
+      .sort((left, right) => {
+        if (right.segmentId !== left.segmentId) {
+          return right.segmentId - left.segmentId;
+        }
+        return right.stateChangedAt - left.stateChangedAt;
+      })[0];
 
     if (latestStreaming) {
       return latestStreaming;
@@ -251,7 +186,7 @@ export default function FloatingSubtitle() {
 
     if (latestCommitted) return latestCommitted;
     if (current) return current;
-    return [...segments].sort((left, right) => right.lastUpdatedAt - left.lastUpdatedAt)[0] ?? null;
+    return [...segments].sort((left, right) => right.segmentId - left.segmentId)[0] ?? null;
   }, [displaySegmentId, handoffUntil, nowTick, segments]);
 
   useEffect(() => {

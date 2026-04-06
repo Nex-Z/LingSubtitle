@@ -65,10 +65,4 @@ impl SubtitleManager {
 
         Ok(())
     }
-
-    pub fn get_current_file(&self) -> Option<String> {
-        self.current_file
-            .as_ref()
-            .map(|p| p.to_string_lossy().to_string())
-    }
 }

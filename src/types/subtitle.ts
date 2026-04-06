@@ -1,4 +1,4 @@
-export type SubtitleSegmentState = "streaming" | "stablePreview" | "final";
+export type SubtitleSegmentState = "streaming" | "final";
 export type TranslationStatus = "idle" | "streaming" | "completed" | "failed";
 
 export interface SubtitleSegmentPayload {
@@ -15,33 +15,6 @@ export interface SubtitleSegmentPayload {
   translationStatus?: TranslationStatus;
   translationStartedAt?: number | null;
   translationFinishedAt?: number | null;
-}
-
-export interface SubtitleTranslationPayload {
-  segmentId: number;
-  revision: number;
-  translatedText: string;
-}
-
-export interface SubtitleTranslationStartedPayload {
-  segmentId: number;
-  revision: number;
-}
-
-export interface SubtitleTranslationDeltaPayload {
-  segmentId: number;
-  revision: number;
-  deltaText: string;
-  accumulatedText: string;
-}
-
-export interface SubtitleTranslationFailedPayload {
-  segmentId: number;
-  revision: number;
-  message: string;
-  errorKind?: string | null;
-  provider?: string | null;
-  resolvedUrl?: string | null;
 }
 
 export interface SubtitleErrorPayload {
