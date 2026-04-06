@@ -20,7 +20,7 @@ use image::{ColorType, ImageEncoder};
 #[cfg(target_os = "windows")]
 use windows::core::{implement, Interface, PCWSTR, HRESULT};
 #[cfg(target_os = "windows")]
-use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
@@ -31,19 +31,15 @@ use windows::Win32::Media::Audio::*;
 #[cfg(target_os = "windows")]
 use windows::Win32::Media::Audio::IActivateAudioInterfaceCompletionHandler_Impl;
 #[cfg(target_os = "windows")]
-use windows::Win32::Media::KernelStreaming::KSDATAFORMAT_SUBTYPE_PCM;
-#[cfg(target_os = "windows")]
-use windows::Win32::Media::Multimedia::KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
-#[cfg(target_os = "windows")]
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
 };
-#[cfg(target_os = "windows")]
-use windows::Win32::System::Com::StructuredStorage::InitPropVariantFromBuffer;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::ProcessStatus::K32GetProcessImageFileNameW;
 #[cfg(target_os = "windows")]
-use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows::Win32::System::Threading::{
+    CreateEventW, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
 #[cfg(target_os = "windows")]
@@ -53,6 +49,108 @@ const TARGET_SAMPLE_RATE: u32 = 16000;
 // Simple noise gate to reduce low-level background noise.
 // Tune this if quiet speech gets clipped (lower) or noise leaks (higher).
 const NOISE_GATE_THRESHOLD: f32 = 0.02; // ~ -34 dBFS
+#[cfg(target_os = "windows")]
+const PROCESS_LOOPBACK_CAPTURE_SAMPLE_RATE: u32 = 44_100;
+#[cfg(target_os = "windows")]
+const PROCESS_LOOPBACK_CAPTURE_CHANNELS: u16 = 2;
+#[cfg(target_os = "windows")]
+const PROCESS_LOOPBACK_CAPTURE_BITS_PER_SAMPLE: u16 = 16;
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy)]
+struct ProcessLoopbackFormat {
+    wave_format: WAVEFORMATEX,
+}
+
+#[cfg(target_os = "windows")]
+impl ProcessLoopbackFormat {
+    fn pcm(sample_rate: u32, channels: u16, bits_per_sample: u16) -> Self {
+        let block_align = channels * (bits_per_sample / 8);
+        Self {
+            wave_format: WAVEFORMATEX {
+                wFormatTag: windows::Win32::Media::Audio::WAVE_FORMAT_PCM as u16,
+                nChannels: channels,
+                nSamplesPerSec: sample_rate,
+                nAvgBytesPerSec: sample_rate * block_align as u32,
+                nBlockAlign: block_align,
+                wBitsPerSample: bits_per_sample,
+                cbSize: 0,
+            },
+        }
+    }
+
+    fn channels(&self) -> usize {
+        self.wave_format.nChannels as usize
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.wave_format.nSamplesPerSec
+    }
+
+    fn describe(&self) -> String {
+        let channels = self.wave_format.nChannels;
+        let bits_per_sample = self.wave_format.wBitsPerSample;
+        format!(
+            "{} Hz, {} ch, {}-bit PCM",
+            self.sample_rate(),
+            channels,
+            bits_per_sample
+        )
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn default_process_loopback_format() -> ProcessLoopbackFormat {
+    ProcessLoopbackFormat::pcm(
+        PROCESS_LOOPBACK_CAPTURE_SAMPLE_RATE,
+        PROCESS_LOOPBACK_CAPTURE_CHANNELS,
+        PROCESS_LOOPBACK_CAPTURE_BITS_PER_SAMPLE,
+    )
+}
+
+#[cfg(target_os = "windows")]
+struct OwnedHandle(HANDLE);
+
+#[cfg(target_os = "windows")]
+impl OwnedHandle {
+    fn raw(&self) -> HANDLE {
+        self.0
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for OwnedHandle {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+struct CoInitGuard {
+    should_uninitialize: bool,
+}
+
+#[cfg(target_os = "windows")]
+impl CoInitGuard {
+    fn multithreaded() -> Self {
+        Self {
+            should_uninitialize: unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).is_ok() },
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for CoInitGuard {
+    fn drop(&mut self) {
+        if self.should_uninitialize {
+            unsafe {
+                CoUninitialize();
+            }
+        }
+    }
+}
 
 pub struct AudioCapture {
     is_running: Arc<AtomicBool>,
@@ -244,7 +342,7 @@ pub struct AudioApp {
 #[cfg(target_os = "windows")]
 pub fn list_audio_apps() -> Result<Vec<AudioApp>, String> {
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let _coinit = CoInitGuard::multithreaded();
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
                 .map_err(|e| format!("Failed to create MMDeviceEnumerator: {}", e))?;
@@ -292,7 +390,6 @@ pub fn list_audio_apps() -> Result<Vec<AudioApp>, String> {
         }
 
         apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-        CoUninitialize();
         Ok(apps)
     }
 }
@@ -428,11 +525,13 @@ impl AudioCapture {
     ) -> Result<u32, String> {
         let is_running = self.is_running.clone();
         is_running.store(true, Ordering::SeqCst);
+        let thread_running = is_running.clone();
 
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<u32, String>>();
         let handle = std::thread::spawn(move || {
             let result = run_process_loopback(process_id, audio_sender, is_running, ready_tx);
             if let Err(e) = result {
+                thread_running.store(false, Ordering::SeqCst);
                 eprintln!("Process loopback error: {}", e);
             }
         });
@@ -440,10 +539,13 @@ impl AudioCapture {
         let sample_rate = match ready_rx.recv_timeout(Duration::from_secs(5)) {
             Ok(Ok(rate)) => rate,
             Ok(Err(err)) => {
+                self.is_running.store(false, Ordering::SeqCst);
                 let _ = handle.join();
                 return Err(err);
             }
             Err(_) => {
+                self.is_running.store(false, Ordering::SeqCst);
+                let _ = handle.join();
                 return Err("Process audio initialization timed out".to_string());
             }
         };
@@ -457,6 +559,7 @@ impl AudioCapture {
 #[implement(IActivateAudioInterfaceCompletionHandler)]
 struct ActivateHandler {
     sender: std::sync::mpsc::Sender<Result<IAudioClient, String>>,
+    process_id: u32,
 }
 
 #[cfg(target_os = "windows")]
@@ -477,8 +580,8 @@ impl IActivateAudioInterfaceCompletionHandler_Impl for ActivateHandler {
                 let _ = self.sender.send(Ok(client));
             } else {
                 let _ = self.sender.send(Err(format!(
-                    "ActivateAudioInterfaceAsync failed: {:#x}",
-                    hr.0
+                    "ActivateAudioInterfaceAsync failed for PID {}: {:#x}",
+                    self.process_id, hr.0
                 )));
             }
         }
@@ -489,10 +592,15 @@ impl IActivateAudioInterfaceCompletionHandler_Impl for ActivateHandler {
 #[cfg(target_os = "windows")]
 fn activate_process_loopback(process_id: u32) -> Result<IAudioClient, String> {
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        if process_id == 0 {
+            return Err("Invalid process id: 0".to_string());
+        }
 
         let (tx, rx) = std::sync::mpsc::channel::<Result<IAudioClient, String>>();
-        let handler = ActivateHandler { sender: tx };
+        let handler = ActivateHandler {
+            sender: tx,
+            process_id,
+        };
         let handler: IActivateAudioInterfaceCompletionHandler = handler.into();
 
         let mut params = AUDIOCLIENT_ACTIVATION_PARAMS::default();
@@ -501,24 +609,35 @@ fn activate_process_loopback(process_id: u32) -> Result<IAudioClient, String> {
         params.Anonymous.ProcessLoopbackParams.ProcessLoopbackMode =
             PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
 
-        let param_bytes = std::slice::from_raw_parts(
-            &params as *const AUDIOCLIENT_ACTIVATION_PARAMS as *const u8,
-            std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>(),
-        );
-
-        let propvariant = InitPropVariantFromBuffer(
-            param_bytes.as_ptr() as *const _,
-            param_bytes.len() as u32,
-        )
-        .map_err(|e| format!("InitPropVariantFromBuffer failed: {}", e))?;
+        let propvariant = windows::core::imp::PROPVARIANT {
+            Anonymous: windows::core::imp::PROPVARIANT_0 {
+                Anonymous: windows::core::imp::PROPVARIANT_0_0 {
+                    vt: windows::Win32::System::Variant::VT_BLOB.0,
+                    wReserved1: 0,
+                    wReserved2: 0,
+                    wReserved3: 0,
+                    Anonymous: windows::core::imp::PROPVARIANT_0_0_0 {
+                        blob: windows::core::imp::BLOB {
+                            cbSize: std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32,
+                            pBlobData: &mut params as *mut AUDIOCLIENT_ACTIVATION_PARAMS as *mut u8,
+                        },
+                    },
+                },
+            },
+        };
 
         let _async_op = ActivateAudioInterfaceAsync(
-            PCWSTR::from_raw(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK.as_ptr()),
+            VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
             &IAudioClient::IID,
-            Some(&propvariant),
+            Some((&propvariant as *const windows::core::imp::PROPVARIANT).cast()),
             &handler,
         )
-        .map_err(|e| format!("ActivateAudioInterfaceAsync failed: {}", e))?;
+        .map_err(|e| {
+            format!(
+                "ActivateAudioInterfaceAsync failed for PID {}: {}. Windows rejected the process-loopback activation request.",
+                process_id, e
+            )
+        })?;
 
         match rx.recv_timeout(Duration::from_secs(5)) {
             Ok(Ok(client)) => Ok(client),
@@ -536,7 +655,7 @@ fn run_process_loopback(
     ready_tx: std::sync::mpsc::Sender<Result<u32, String>>,
 ) -> Result<(), String> {
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let _coinit = CoInitGuard::multithreaded();
 
         let audio_client = match activate_process_loopback(process_id) {
             Ok(client) => client,
@@ -546,60 +665,49 @@ fn run_process_loopback(
             }
         };
 
-        let mix_format_ptr = audio_client
-            .GetMixFormat()
-            .map_err(|e| {
-                let msg = format!("GetMixFormat failed: {}", e);
-                let _ = ready_tx.send(Err(msg.clone()));
-                msg
-            })?;
-        if mix_format_ptr.is_null() {
-            let msg = "GetMixFormat returned null".to_string();
-            let _ = ready_tx.send(Err(msg.clone()));
-            return Err(msg);
-        }
+        // The process-loopback virtual device exposes a CMixerClient that does not
+        // implement GetMixFormat / IsFormatSupported. Microsoft recommends using a
+        // well-known PCM shared-mode format instead of probing the virtual device.
+        let capture_format = default_process_loopback_format();
+        let channels = capture_format.channels();
+        let device_sample_rate = capture_format.sample_rate();
+        let stream_flags = AUDCLNT_STREAMFLAGS_LOOPBACK
+            | AUDCLNT_STREAMFLAGS_EVENTCALLBACK
+            | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
+            | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
 
-        let mix_format = &*mix_format_ptr;
-        let channels = mix_format.nChannels as usize;
-        let device_sample_rate = mix_format.nSamplesPerSec;
-
-        let (is_float, bits_per_sample) = match mix_format.wFormatTag as u32 {
-            windows::Win32::Media::Multimedia::WAVE_FORMAT_IEEE_FLOAT => {
-                (true, mix_format.wBitsPerSample)
-            }
-            windows::Win32::Media::Audio::WAVE_FORMAT_PCM => (false, mix_format.wBitsPerSample),
-            windows::Win32::Media::KernelStreaming::WAVE_FORMAT_EXTENSIBLE => {
-                let ext = &*(mix_format_ptr as *const WAVEFORMATEXTENSIBLE);
-                let sub_format = std::ptr::addr_of!(ext.SubFormat).read_unaligned();
-                if sub_format == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT {
-                    (true, ext.Format.wBitsPerSample)
-                } else if sub_format == KSDATAFORMAT_SUBTYPE_PCM {
-                    (false, ext.Format.wBitsPerSample)
-                } else {
-                    let msg = "Unsupported mix format subformat".to_string();
-                    let _ = ready_tx.send(Err(msg.clone()));
-                    return Err(msg);
-                }
-            }
-            _ => {
-                let msg = "Unsupported mix format tag".to_string();
-                let _ = ready_tx.send(Err(msg.clone()));
-                return Err(msg);
-            }
-        };
-
-        let buffer_duration: i64 = 10_000_000 / 10; // 100ms in 100ns units
         audio_client
             .Initialize(
                 AUDCLNT_SHAREMODE_SHARED,
-                AUDCLNT_STREAMFLAGS_LOOPBACK,
-                buffer_duration,
+                stream_flags,
                 0,
-                mix_format_ptr,
+                0,
+                &capture_format.wave_format,
                 None,
             )
             .map_err(|e| {
-                let msg = format!("AudioClient Initialize failed: {}", e);
+                let msg = format!(
+                    "AudioClient Initialize failed for PID {} with {}: {}",
+                    process_id,
+                    capture_format.describe(),
+                    e
+                );
+                let _ = ready_tx.send(Err(msg.clone()));
+                msg
+            })?;
+
+        let capture_event = CreateEventW(None, false, false, None)
+            .map(OwnedHandle)
+            .map_err(|e| {
+                let msg = format!("CreateEventW failed for PID {}: {}", process_id, e);
+                let _ = ready_tx.send(Err(msg.clone()));
+                msg
+            })?;
+
+        audio_client
+            .SetEventHandle(capture_event.raw())
+            .map_err(|e| {
+                let msg = format!("AudioClient SetEventHandle failed for PID {}: {}", process_id, e);
                 let _ = ready_tx.send(Err(msg.clone()));
                 msg
             })?;
@@ -620,16 +728,24 @@ fn run_process_loopback(
                 msg
             })?;
 
-        CoTaskMemFree(Some(mix_format_ptr as _));
-
         let _ = ready_tx.send(Ok(TARGET_SAMPLE_RATE));
 
         while running.load(Ordering::SeqCst) {
+            match WaitForSingleObject(capture_event.raw(), 100) {
+                WAIT_OBJECT_0 => {}
+                WAIT_TIMEOUT => continue,
+                wait_result => {
+                    return Err(format!(
+                        "WaitForSingleObject failed for PID {}: {:?}",
+                        process_id, wait_result
+                    ));
+                }
+            }
+
             let mut packet_frames = capture_client
                 .GetNextPacketSize()
                 .map_err(|e| format!("GetNextPacketSize failed: {}", e))?;
             if packet_frames == 0 {
-                std::thread::sleep(Duration::from_millis(10));
                 continue;
             }
 
@@ -647,13 +763,7 @@ fn run_process_loopback(
                 let mut samples_f32: Vec<f32> = Vec::with_capacity(sample_count);
                 if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 {
                     samples_f32.resize(sample_count, 0.0);
-                } else if is_float && bits_per_sample == 32 {
-                    let float_slice = std::slice::from_raw_parts(
-                        data_ptr as *const f32,
-                        sample_count,
-                    );
-                    samples_f32.extend_from_slice(float_slice);
-                } else if !is_float && bits_per_sample == 16 {
+                } else if capture_format.wave_format.wBitsPerSample == 16 {
                     let int_slice = std::slice::from_raw_parts(
                         data_ptr as *const i16,
                         sample_count,
@@ -668,8 +778,8 @@ fn run_process_loopback(
                         .ReleaseBuffer(num_frames)
                         .ok();
                     return Err(format!(
-                        "Unsupported audio format (float={}, bits={})",
-                        is_float, bits_per_sample
+                        "Unsupported process-loopback format: {}",
+                        capture_format.describe()
                     ));
                 }
 
@@ -692,7 +802,6 @@ fn run_process_loopback(
         }
 
         let _ = audio_client.Stop();
-        CoUninitialize();
         Ok(())
     }
 }
