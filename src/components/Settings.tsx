@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./Settings.css";
 import type { AppConfig, GummyCapabilities } from "../types/gummy";
@@ -7,7 +7,7 @@ interface SettingsProps {
   onBack: () => void;
 }
 
-type SettingsTab = "asr" | "translation" | "save";
+type SettingsTab = "asr" | "save";
 
 function SvgIcon({
   children,
@@ -51,15 +51,6 @@ function MicIcon({ className }: { className?: string }) {
   );
 }
 
-function SparkIcon({ className }: { className?: string }) {
-  return (
-    <SvgIcon className={className}>
-      <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z" />
-      <path d="M19 14l.9 2.1L22 17l-2.1.9L19 20l-.9-2.1L16 17l2.1-.9L19 14Z" />
-    </SvgIcon>
-  );
-}
-
 function FolderIcon({ className }: { className?: string }) {
   return (
     <SvgIcon className={className}>
@@ -90,7 +81,6 @@ function EyeOffIcon({ className }: { className?: string }) {
 
 const tabMeta: Record<SettingsTab, { label: string; desc: string }> = {
   asr: { label: "Gummy 识别", desc: "连接、VAD 与热词" },
-  translation: { label: "实时翻译", desc: "目标语言与成本开关" },
   save: { label: "保存设置", desc: "自动导出与路径" },
 };
 
@@ -148,13 +138,6 @@ export default function Settings({ onBack }: SettingsProps) {
     setConfig((prev) => ({ ...prev, asr: { ...prev.asr, [field]: value } }));
   };
 
-  const updateTranslation = (
-    field: keyof AppConfig["translation"],
-    value: string | boolean
-  ) => {
-    setConfig((prev) => ({ ...prev, translation: { ...prev.translation, [field]: value } }));
-  };
-
   const updateSave = (field: keyof AppConfig["save"], value: string | boolean) => {
     setConfig((prev) => ({ ...prev, save: { ...prev.save, [field]: value } }));
   };
@@ -171,21 +154,6 @@ export default function Settings({ onBack }: SettingsProps) {
     else if (preset === "balanced") updateAsr("vad_silence_ms", 800);
     else if (preset === "stable") updateAsr("vad_silence_ms", 1200);
   };
-
-  const sourceLanguageLabel = useMemo(() => {
-    return (
-      capabilities?.sourceLanguages.find((item) => item.code === config.asr.language)?.label ||
-      config.asr.language
-    );
-  }, [capabilities, config.asr.language]);
-
-  const targetOptions = useMemo(() => {
-    if (!capabilities) return [];
-    return capabilities.targetLanguagesBySource[config.asr.language] || [];
-  }, [capabilities, config.asr.language]);
-
-  const translationBlockedByAutoSource =
-    config.translation.enabled && config.asr.language === "auto";
 
   if (loading) {
     return (
@@ -228,7 +196,6 @@ export default function Settings({ onBack }: SettingsProps) {
               onClick={() => setActiveTab(tab)}
             >
               {tab === "asr" && <MicIcon className="sidebar-icon" />}
-              {tab === "translation" && <SparkIcon className="sidebar-icon" />}
               {tab === "save" && <FolderIcon className="sidebar-icon" />}
               <span className="sidebar-copy">
                 <span className="sidebar-title">{tabMeta[tab].label}</span>
@@ -244,7 +211,7 @@ export default function Settings({ onBack }: SettingsProps) {
               <div className="panel-header">
                 <div>
                   <div className="panel-title">Gummy 识别链路</div>
-                  <div className="panel-desc">这里配置实时语音任务本身，翻译不再走单独的文本模型。</div>
+                  <div className="panel-desc">这里配置实时语音任务本身。翻译开关和目标语言已经收敛到首页快捷栏。</div>
                 </div>
               </div>
 
@@ -360,62 +327,6 @@ export default function Settings({ onBack }: SettingsProps) {
                       )
                     }
                   />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "translation" && (
-            <div className="settings-panel">
-              <div className="panel-header">
-                <div>
-                  <div className="panel-title">Gummy 实时翻译</div>
-                  <div className="panel-desc">翻译跟识别共用一条实时任务流，开启后才会产生额外翻译计费。</div>
-                </div>
-                <label className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={config.translation.enabled}
-                    onChange={(e) => updateTranslation("enabled", e.target.checked)}
-                  />
-                  <span className="toggle-slider" />
-                </label>
-              </div>
-
-              <div className="settings-form-grid">
-                <div className="form-field span-2">
-                  <label className="form-label">当前源语言</label>
-                  <input className="input-field" value={sourceLanguageLabel} readOnly disabled />
-                  <span className="form-hint">
-                    源语言在首页快捷栏里切换。翻译开启后，录制时不允许使用“自动识别”。
-                  </span>
-                </div>
-
-                <div className="form-field span-2">
-                  <label className="form-label">目标语言</label>
-                  <select
-                    className="input-field"
-                    value={config.translation.target_language}
-                    onChange={(e) => updateTranslation("target_language", e.target.value)}
-                    disabled={translationBlockedByAutoSource || targetOptions.length === 0}
-                  >
-                    {targetOptions.length === 0 ? (
-                      <option value={config.translation.target_language}>
-                        先在首页选择明确的识别语言
-                      </option>
-                    ) : (
-                      targetOptions.map((item) => (
-                        <option key={item.code} value={item.code}>
-                          {item.label}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                  <span className="form-hint">
-                    {translationBlockedByAutoSource
-                      ? "当前源语言为自动识别，Gummy 严格语言对校验已阻止目标语言选择。"
-                      : "目标语言列表按 Gummy 官方支持矩阵自动过滤。"}
-                  </span>
                 </div>
               </div>
             </div>

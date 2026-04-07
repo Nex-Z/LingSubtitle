@@ -25,7 +25,14 @@ dist-ssr
 
 # Project specific exclusions
 阿里云实时语音接入文档.md
+阿里云文本生成接口文档.md
 *plan.md
 task.md
 walkthrough.md
 brain/
+.codex/
+.trae/
+tmp_check.ps1
+.env
+.env.*
+!.env.example

@@ -127,17 +127,19 @@ fn config_path(app: &AppHandle) -> PathBuf {
 pub fn load_config(app: &AppHandle) -> AppConfig {
     let path = config_path(app);
     if !path.exists() {
-        let config = AppConfig::default();
+        let config = sanitize_config(AppConfig::default());
         save_config_to_file(app, &config);
         return config;
     }
 
     let content = fs::read_to_string(&path).unwrap_or_default();
-    let config = serde_json::from_str::<Value>(&content)
-        .ok()
-        .map(migrate_config_value)
-        .and_then(|value| serde_json::from_value::<AppConfig>(value).ok())
-        .unwrap_or_default();
+    let config = sanitize_config(
+        serde_json::from_str::<Value>(&content)
+            .ok()
+            .map(migrate_config_value)
+            .and_then(|value| serde_json::from_value::<AppConfig>(value).ok())
+            .unwrap_or_default(),
+    );
 
     save_config_to_file(app, &config);
     config
@@ -145,7 +147,8 @@ pub fn load_config(app: &AppHandle) -> AppConfig {
 
 fn save_config_to_file(app: &AppHandle, config: &AppConfig) {
     let path = config_path(app);
-    if let Ok(content) = serde_json::to_string_pretty(config) {
+    let normalized = sanitize_config(config.clone());
+    if let Ok(content) = serde_json::to_string_pretty(&normalized) {
         fs::write(&path, content).ok();
     }
 }
@@ -162,6 +165,7 @@ pub fn save_config(
     state: tauri::State<'_, Mutex<AppConfig>>,
     config: AppConfig,
 ) -> Result<(), String> {
+    let config = sanitize_config(config);
     save_config_to_file(&app, &config);
     let mut current = state.lock().map_err(|e| e.to_string())?;
     *current = config.clone();
@@ -285,10 +289,30 @@ fn normalize_asr_base_url(value: &str, default_value: &str) -> String {
 
 fn normalize_asr_model(value: &str, default_value: &str) -> String {
     let normalized = value.trim();
-    if normalized.eq_ignore_ascii_case(LEGACY_QWEN3_ASR_MODEL) {
+    if is_legacy_qwen3_asr_model(normalized) {
         return default_value.to_string();
     }
     normalized.to_string()
+}
+
+fn sanitize_config(mut config: AppConfig) -> AppConfig {
+    config.asr.base_url = normalize_asr_base_url(&config.asr.base_url, DEFAULT_BASE_URL);
+    config.asr.model = normalize_asr_model(&config.asr.model, DEFAULT_MODEL);
+    config.asr.language = normalize_source_language(&config.asr.language)
+        .unwrap_or_else(|| DEFAULT_SOURCE_LANGUAGE.to_string());
+    config.asr.sample_rate = DEFAULT_SAMPLE_RATE;
+    config.asr.vad_silence_ms = config.asr.vad_silence_ms.clamp(200, 6_000);
+    config.translation.target_language =
+        normalize_target_language(&config.translation.target_language)
+            .unwrap_or_else(|| DEFAULT_TARGET_LANGUAGE.to_string());
+    config
+}
+
+fn is_legacy_qwen3_asr_model(value: &str) -> bool {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with(LEGACY_QWEN3_ASR_MODEL)
 }
 
 fn merge_with_default<T>(value: Value, defaults: &T) -> Value
@@ -359,6 +383,17 @@ mod tests {
         }));
 
         assert_eq!(migrated["asr"]["vad_silence_ms"], 6000);
+    }
+
+    #[test]
+    fn migrates_versioned_legacy_asr_model_to_gummy_default() {
+        let migrated = migrate_config_value(json!({
+            "asr": {
+                "model": "qwen3-asr-flash-realtime-2026-02-10"
+            }
+        }));
+
+        assert_eq!(migrated["asr"]["model"], "gummy-realtime-v1");
     }
 
     #[test]
